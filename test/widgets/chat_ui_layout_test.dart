@@ -22,6 +22,7 @@ class _State extends AppState {
   bool online = true;
   bool fail = false;
   bool planGone = false;
+  Object? refreshFailure;
   DesktopLinkStatus? linkOverride;
   int refreshes = 0;
   Completer<void>? refreshing;
@@ -35,6 +36,7 @@ class _State extends AppState {
     await refreshing?.future;
     history.loading = false;
     update();
+    if (refreshFailure case final failure?) throw failure;
   }
 
   Map<String, Object?> lastParams = const {};
@@ -227,6 +229,23 @@ void main() {
     expect(find.text('同步中…'), findsNothing);
     expect(find.text('缓存中的旧消息'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('同步超时显示用户文案，不泄露原始异常且保留历史', (tester) async {
+    final state = _State()
+      ..refreshFailure = TimeoutException('open took too long 原始异常');
+    addTearDown(state.dispose);
+    state.history
+      ..items.add({'t': 'user', 'text': '缓存中的旧消息'})
+      ..error = '内容没有更新，请重试';
+    await tester.pumpWidget(_host(state));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
+    expect(find.text('电脑没有及时回应，请检查网络后重试。'), findsOneWidget);
+    expect(find.textContaining('TimeoutException'), findsNothing);
+    expect(find.textContaining('原始异常'), findsNothing);
+    expect(find.text('缓存中的旧消息'), findsOneWidget);
   });
 
   testWidgets('内容同步失败与连接状态区分，可重试且保留原消息', (tester) async {

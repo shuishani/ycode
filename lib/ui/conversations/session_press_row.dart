@@ -13,10 +13,14 @@ class SessionPressRow extends StatefulWidget {
     required this.state,
     required this.session,
     required this.child,
+    this.showHome = true,
   });
   final AppState state;
   final SessionRef session;
   final Widget child;
+
+  /// 「放到首页」只对列表首页有意义。
+  final bool showHome;
 
   @override
   State<SessionPressRow> createState() => _SessionPressRowState();
@@ -72,12 +76,13 @@ class _SessionPressRowState extends State<SessionPressRow> {
           ),
         ],
         // 只是手机自己的选择，离线也能改。
-        PressMenuItem(
-          state.onHome(ref)
-              ? state.tr('从首页移除', 'Remove from home')
-              : state.tr('放到首页', 'Show on home'),
-          () => _run(() => state.setOnHome(ref, !state.onHome(ref))),
-        ),
+        if (widget.showHome)
+          PressMenuItem(
+            state.onHome(ref)
+                ? state.tr('从首页移除', 'Remove from home')
+                : state.tr('放到首页', 'Show on home'),
+            () => _run(() => state.setOnHome(ref, !state.onHome(ref))),
+          ),
         if (online) ...[
           PressMenuItem(
             state.tr('归档', 'Archive'),

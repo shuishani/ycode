@@ -180,15 +180,32 @@ void main() {
       expect(again.sessionUnread(again.sessions.single), isTrue);
     });
 
-    test('开着的时候做完，关掉也算看过', () async {
+    test('开在前台屏幕上时做完不算未读，退到后台才算，关掉也算看过', () async {
       final state = _Seen(MemoryLinkStore(), session);
       addTearDown(state.dispose);
       await state.initialize();
       await state.openSession('demo-desktop', 'a');
       state.current = _session('a', DateTime(2026, 2));
+      expect(state.sessionUnread(state.sessions.single), isFalse);
+      state.foreground = false;
       expect(state.sessionUnread(state.sessions.single), isTrue);
+      state.foreground = true;
       await state.closeSession('demo-desktop', 'a');
       expect(state.sessionUnread(state.sessions.single), isFalse);
+    });
+
+    test('同一段对话开着两页，关掉一页仍算正在看', () async {
+      final state = _Seen(MemoryLinkStore(), session);
+      addTearDown(state.dispose);
+      await state.initialize();
+      await state.openSession('demo-desktop', 'a');
+      await state.openSession('demo-desktop', 'a');
+      await state.closeSession('demo-desktop', 'a');
+      state.current = _session('a', DateTime(2026, 2));
+      expect(state.sessionUnread(state.sessions.single), isFalse);
+      await state.closeSession('demo-desktop', 'a');
+      state.current = _session('a', DateTime(2026, 3));
+      expect(state.sessionUnread(state.sessions.single), isTrue);
     });
 
     test('写不进存储也不抛错，这次运行里仍然算看过', () async {

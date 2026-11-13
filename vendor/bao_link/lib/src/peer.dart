@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'connection.dart';
@@ -49,9 +50,14 @@ typedef LinkRequestHandler = FutureOr<Object?> Function(
 class LinkPeer {
   LinkPeer._(this.connection, this._control, this._onRequest, this.mirror) {
     _control.messages.listen(
-      _receive,
+      (bytes) {
+        // 大消息异步解析，但快照、应答和增量仍按控制流原顺序处理。
+        _receiving = _receiving.then((_) async {
+          if (!isClosed) await _receive(bytes);
+        }).catchError((Object _) => _end());
+      },
       onError: (Object _) => _end(),
-      onDone: _end,
+      onDone: () => unawaited(_receiving.whenComplete(_end)),
     );
     unawaited(connection.closed.then((_) => _end()));
   }
@@ -113,6 +119,7 @@ class LinkPeer {
 
   set onRequest(LinkRequestHandler? handler) => _onRequest = handler;
 
+  Future<void> _receiving = Future.value();
   int _nextId = 1;
   final Map<int, _Pending> _pending = {};
   final _events = StreamController<LinkEvent>.broadcast();
@@ -144,7 +151,13 @@ class LinkPeer {
     if (method == LinkMethods.close && params['session'] is String) {
       mirror?.closed(params['session']! as String);
     }
-    _write(_control, {'id': id, 'm': method, 'p': params});
+    unawaited(
+      _write(_control, {'id': id, 'm': method, 'p': params}).catchError(
+        (Object error, StackTrace stack) {
+          _pending.remove(id)?.completer.completeError(error, stack);
+        },
+      ),
+    );
     return pending.completer.future.timeout(
       timeout,
       onTimeout: () {
@@ -154,42 +167,64 @@ class LinkPeer {
     );
   }
 
+  /// 用独立流检查往返，避免排在控制流的大历史或图片之后。
+  /// 仍使用已有的 state 请求；会话快照和增量继续在控制流按序处理。
+  Future<Object?> probe(Duration timeout) {
+    if (isClosed) return Future.error(const LinkClosedException('closed'));
+    return _callOnStream(LinkMethods.state, const {}, timeout);
+  }
+
   Future<Object?> _callOnStream(
     String method,
     Map<String, Object?> params,
     Duration timeout,
   ) async {
-    final stream = await connection.open();
+    LinkStream? stream;
+    var expired = false;
     try {
       return await () async {
-        _write(stream, {'id': 0, 'm': method, 'p': params});
-        unawaited(stream.finish().catchError((Object _) {}));
-        final message = await stream.messages.first;
-        return switch (_decode(message)) {
+        final opened = await connection.open();
+        if (expired || isClosed) {
+          opened.reset();
+          throw const LinkClosedException('closed');
+        }
+        stream = opened;
+        await _write(opened, {'id': 0, 'm': method, 'p': params});
+        unawaited(opened.finish().catchError((Object _) {}));
+        final message = await opened.messages.first;
+        return switch (await _decodeIncoming(message)) {
           {'e': {'c': final String code, 'm': final String text}} =>
             throw LinkRemoteException(code, text),
           final Map<String, Object?> answer => answer['r'],
           _ => throw const LinkRemoteException('failed', 'Bad answer'),
         };
       }().timeout(timeout);
+    } on LinkRemoteException {
+      rethrow;
     } on StateError {
       // Ended with no answer.
       throw const LinkClosedException('no answer');
     } on TimeoutException {
-      stream.reset();
+      expired = true;
+      stream?.reset();
       throw TimeoutException('$method took too long', timeout);
+    } on Object {
+      stream?.reset();
+      rethrow;
     }
   }
 
   /// Tells the other end [name].
   void emit(String name, [Object? data]) {
-    if (!isClosed) _write(_control, {'ev': name, 'p': data});
+    if (!isClosed) {
+      unawaited(
+        _write(_control, {'ev': name, 'p': data}).catchError((Object _) => _end()),
+      );
+    }
   }
 
-  void _write(LinkStream stream, Map<String, Object?> message) {
-    stream
-        .send(Uint8List.fromList(utf8.encode(jsonEncode(message))))
-        .catchError((Object _) {});
+  Future<void> _write(LinkStream stream, Map<String, Object?> message) async {
+    await stream.send(Uint8List.fromList(utf8.encode(jsonEncode(message))));
   }
 
   static Object? _decode(Uint8List bytes) {
@@ -200,16 +235,23 @@ class LinkPeer {
     }
   }
 
-  void _receive(Uint8List bytes) {
-    final message = _decode(bytes);
+  static Future<Object?> _decodeIncoming(Uint8List bytes) {
+    if (bytes.length < 256 * 1024) return Future.value(_decode(bytes));
+    final data = TransferableTypedData.fromList([bytes]);
+    return Isolate.run(() => _decode(data.materialize().asUint8List()));
+  }
+
+  Future<void> _receive(Uint8List bytes) async {
+    final message = await _decodeIncoming(bytes);
+    if (isClosed) return;
     switch (message) {
       case {'ev': final String name}:
         _event(name, message['p']);
       case {'id': final int id, 'm': final String method}:
         unawaited(
-          _answer(method, message['p']).then((answer) {
-            if (!isClosed) _write(_control, {'id': id, ...answer});
-          }),
+          _answer(method, message['p']).then((answer) async {
+            if (!isClosed) await _write(_control, {'id': id, ...answer});
+          }).catchError((Object _) => _end()),
         );
       case {
         'id': final int id,
@@ -289,14 +331,14 @@ class LinkPeer {
       final message = await stream.messages.first.timeout(
         const Duration(seconds: 30),
       );
-      final request = _decode(message);
+      final request = await _decodeIncoming(message);
       final answer = request is Map<String, Object?> && request['m'] is String
           ? await _answer(request['m']! as String, request['p'])
           : const {
               'e': {'c': 'failed', 'm': 'Bad request'},
             };
       if (isClosed) return;
-      _write(stream, {'id': 0, ...answer});
+      await _write(stream, {'id': 0, ...answer});
       await stream.finish();
     } on Object {
       stream.reset();

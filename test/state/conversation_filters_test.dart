@@ -39,92 +39,40 @@ void main() {
     expect(projectSource('ssh:///missing'), ConversationSource.unknown);
     expect(projectSource('future://host/project'), ConversationSource.unknown);
   });
-  test('同名项目按电脑隔离且待处理与运行使用同一条件', () {
+  test('搜索匹配项目名、电脑名和对话标题，项目置顶优先', () {
     const projects = [
       ProjectRef('a', ProjectInfo(id: '/p', name: 'mobile', path: '/p')),
-      ProjectRef('b', ProjectInfo(id: '/p', name: 'mobile', path: '/p')),
-    ];
-    final sessions = [
-      task('a', 'idle', '/p'),
-      task('a', 'question', '/p', status: LinkSessionStatus.needsInput),
-      task('b', 'other', '/p', status: LinkSessionStatus.running),
-    ];
-    final result = const ConversationFilters(
-      projectKey: ('a', '/p'),
-      status: ConversationStatus.active,
-    ).projects(projects, sessions, (id) => id);
-    expect(result.length, 1);
-    expect(result.single.sessions.map((s) => s.session.id), ['question']);
-  });
-  test('搜索和来源状态组合并保留项目置顶优先', () {
-    const projects = [
+      ProjectRef('a', ProjectInfo(id: '/q', name: 'server', path: '/q')),
       ProjectRef(
         'a',
-        ProjectInfo(id: 'ssh://dev/p', name: 'mobile', path: '/p'),
-      ),
-      ProjectRef(
-        'a',
-        ProjectInfo(id: '/local', name: 'mobile', path: '/local'),
-      ),
-      ProjectRef(
-        'a',
-        ProjectInfo(
-          id: 'ssh://dev/q',
-          name: 'mobile old',
-          path: '/q',
-          pinned: true,
-        ),
+        ProjectInfo(id: '/r', name: 'mobile old', path: '/r', pinned: true),
       ),
     ];
     final sessions = [
-      task('a', 'remote', 'ssh://dev/p', day: 3),
-      task('a', 'local', '/local'),
-      task('a', 'pinned-project', 'ssh://dev/q'),
+      task('a', '修复登录', '/p', day: 3),
+      task('a', 'mobile 接口', '/q'),
+      task('a', '旧版', '/r'),
     ];
-    final result = const ConversationFilters(
-      query: 'mobile',
-      source: ConversationSource.ssh,
-    ).projects(projects, sessions, (id) => id);
-    expect(result.map((p) => p.ref.project.id), ['ssh://dev/q', 'ssh://dev/p']);
+    final byProject = const ConversationFilters(query: 'Mobile')
+        .projects(projects, sessions, (id) => id);
+    expect(byProject.map((p) => p.ref.project.id), ['/r', '/p', '/q']);
+    expect(byProject.last.sessions.map((s) => s.session.id), ['mobile 接口']);
+    final byDesktop = const ConversationFilters(query: '我的电脑')
+        .projects(projects, sessions, (_) => '我的电脑');
+    expect(byDesktop, hasLength(3));
   });
-  test('SSH / WSL 范围同时包含两类远程项目但不含本机', () {
-    const projects = [
-      ProjectRef('a', ProjectInfo(id: 'ssh://dev/p', name: 'ssh', path: '/p')),
-      ProjectRef(
-        'a',
-        ProjectInfo(id: 'ssh://wsl+Ubuntu/q', name: 'wsl', path: '/q'),
-      ),
-      ProjectRef(
-        'a',
-        ProjectInfo(id: r'C:\Work\r', name: 'local', path: r'C:\Work\r'),
-      ),
-      ProjectRef(
-        'a',
-        ProjectInfo(id: 'future://x/y', name: 'unknown', path: '/y'),
-      ),
-    ];
-    final names = const ConversationFilters(source: ConversationSource.remote)
-        .projects(projects, [], (id) => id)
-        .map((p) => p.ref.project.name);
-    expect(names, unorderedEquals(['ssh', 'wsl']));
-  });
-  test('失去已选项目不改选同名项目，活跃筛选不显示空项目', () {
+  test('不搜索时列出没有对话的项目，搜不到时不显示', () {
     const projects = [
       ProjectRef('b', ProjectInfo(id: '/p', name: 'mobile', path: '/p')),
     ];
-    expect(
-      const ConversationFilters(projectKey: ('a', '/p'))
-          .projects(projects, [], (id) => id),
-      isEmpty,
-    );
-    expect(
-      const ConversationFilters(status: ConversationStatus.active)
-          .projects(projects, [], (id) => id),
-      isEmpty,
-    );
     expect(
       const ConversationFilters().projects(projects, [], (id) => id),
       hasLength(1),
+    );
+    expect(
+      const ConversationFilters(query: '不存在')
+          .projects(projects, [], (id) => id),
+      isEmpty,
     );
   });
 }

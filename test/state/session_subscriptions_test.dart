@@ -56,6 +56,41 @@ class Harness {
 }
 
 void main() {
+  test('连续连接恢复时复用完整基线，不再打开快照', () async {
+    final h = Harness();
+    addTearDown(h.subscriptions.dispose);
+    await h.follow();
+    h.subscriptions.accept('desktop', {
+      'session': 'session',
+      'start': 1,
+      'count': 2,
+      'items': [3],
+    });
+    await h.subscriptions.refreshRetained(
+      (_) => true,
+      keepCurrent: (_, _) => true,
+    );
+    expect(h.opens, hasLength(1));
+    expect(h.subscriptions.buffer('desktop', 'session').items, [1, 3]);
+    expect(h.subscriptions.buffer('desktop', 'session').loading, isFalse);
+  });
+
+  test('断线后即使保留旧内容，也必须重建基线', () async {
+    final h = Harness();
+    addTearDown(h.subscriptions.dispose);
+    await h.follow();
+    h.subscriptions.connectionChanged('desktop', online: false);
+    final resumed = h.subscriptions.refreshRetained(
+      (_) => true,
+      keepCurrent: (_, _) => true,
+    );
+    expect(h.opens, hasLength(2));
+    expect(h.subscriptions.buffer('desktop', 'session').items, [1, 2]);
+    h.opens.last.complete(snapshot([3, 4]));
+    await resumed;
+    expect(h.subscriptions.buffer('desktop', 'session').items, [3, 4]);
+  });
+
   test('two pages share a subscription until the last page closes', () async {
     final h = Harness();
     addTearDown(h.subscriptions.dispose);

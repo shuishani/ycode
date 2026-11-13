@@ -3,14 +3,47 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../chat/chat_clipboard.dart';
+import '../../chat/chat_models.dart';
 import '../../state/app_state.dart';
 import 'mobile_widgets.dart';
 
 /// 画廊里的一张图。
 class GalleryImage {
-  const GalleryImage(this.bytes, {this.name});
-  final Uint8List bytes;
+  const GalleryImage(Uint8List this._bytes, {this.name}) : _loadBytes = null;
+  GalleryImage.lazy({required Uint8List Function() this._loadBytes, this.name})
+    : _bytes = null;
+
+  /// 统一附件转换，保留按需读取字节，避免预览前解码整段历史。
+  factory GalleryImage.fromAttachment(ImageAttachment attachment) =>
+      GalleryImage.lazy(
+        loadBytes: () => attachment.bytes,
+        name: attachment.name,
+      );
+
+  final Uint8List? _bytes;
+  final Uint8List Function()? _loadBytes;
+  Uint8List get bytes => _bytes ?? _loadBytes!();
   final String? name;
+}
+
+typedef GallerySelection = ({List<GalleryImage> images, int index});
+
+/// 在点击时才收集当前对话的图片；附件编辑区没有此作用域，仍只预览待发附件。
+class ImageGalleryScope extends InheritedWidget {
+  const ImageGalleryScope({
+    super.key,
+    required this.resolve,
+    required super.child,
+  });
+
+  final GallerySelection Function(GallerySelection selection) resolve;
+
+  static ImageGalleryScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ImageGalleryScope>();
+
+  @override
+  bool updateShouldNotify(ImageGalleryScope oldWidget) =>
+      resolve != oldWidget.resolve;
 }
 
 /// 保存当前图片；默认写入系统相册，测试可替换为平台边界的 fake。
@@ -32,13 +65,17 @@ Future<void> showImageGallery(
   // 先放掉输入焦点：否则关闭路由时焦点会回到输入框并再次弹出键盘。
   // 只是失焦，控制器里的草稿与光标不变；用户再点输入框即可正常聚焦。
   FocusManager.instance.primaryFocus?.unfocus();
+  final selected = ImageGalleryScope.maybeOf(context)
+      ?.resolve((images: images, index: initialIndex));
   return showDialog<void>(
     context: context,
     builder: (_) => Dialog.fullscreen(
-      child: ImageGalleryPage(
-        images: images,
-        initialIndex: initialIndex,
-        saver: saver,
+      child: ScaffoldMessenger(
+        child: ImageGalleryPage(
+          images: selected?.images ?? images,
+          initialIndex: selected?.index ?? initialIndex,
+          saver: saver,
+        ),
       ),
     ),
   );
@@ -113,6 +150,28 @@ class _ImageGalleryPageState extends State<ImageGalleryPage> {
     }
   }
 
+  Future<void> _save() async {
+    try {
+      await (widget.saver ?? _saveToGallery)(
+        context,
+        widget.images[_index].bytes,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppState.phrase(
+                '无法保存图片，请重试。',
+                'Could not save the image. Try again.',
+              ),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final images = widget.images;
@@ -145,8 +204,7 @@ class _ImageGalleryPageState extends State<ImageGalleryPage> {
           IconButton(
             tooltip: AppState.phrase('保存到相册', 'Save to gallery'),
             icon: const Icon(Icons.save_alt),
-            onPressed: () =>
-                (widget.saver ?? _saveToGallery)(context, current.bytes),
+            onPressed: _save,
           ),
         ],
       ),
@@ -160,9 +218,11 @@ class _ImageGalleryPageState extends State<ImageGalleryPage> {
         }),
         itemBuilder: (_, i) => _GalleryPage(
           // 含索引：同一份字节被重复附加时各页仍有独立身份。
-          key: ValueKey((i, images[i].bytes)),
+          key: ValueKey((i, images[i])),
           image: images[i],
-          onZoomed: _setZoomed,
+          onZoomed: (zoomed) {
+            if (i == _index) _setZoomed(zoomed);
+          },
         ),
       ),
     );
@@ -180,16 +240,26 @@ class _GalleryPage extends StatefulWidget {
 
 class _GalleryPageState extends State<_GalleryPage> {
   final _controller = TransformationController();
-  late final MemoryImage _provider = MemoryImage(widget.image.bytes);
+  MemoryImage? _provider;
+  bool _zoomed = false;
 
   @override
   void initState() {
     super.initState();
+    try {
+      _provider = MemoryImage(widget.image.bytes);
+    } on FormatException {
+      // 损坏的附件显示错误占位，但不阻止继续翻看其他图片。
+    }
     _controller.addListener(_scaled);
   }
 
-  void _scaled() =>
-      widget.onZoomed(_controller.value.getMaxScaleOnAxis() > 1.01);
+  void _scaled() {
+    final zoomed = _controller.value.getMaxScaleOnAxis() > 1.01;
+    if (_zoomed == zoomed) return;
+    setState(() => _zoomed = zoomed);
+    widget.onZoomed(zoomed);
+  }
 
   @override
   void dispose() {
@@ -197,24 +267,34 @@ class _GalleryPageState extends State<_GalleryPage> {
       ..removeListener(_scaled)
       ..dispose();
     // 关闭后不让大图继续占用全局图片缓存。
-    _provider.evict();
+    _provider?.evict();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) => InteractiveViewer(
-    transformationController: _controller,
-    minScale: 1,
-    maxScale: 8,
-    child: SizedBox.expand(
-      child: Image(
-        image: _provider,
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
-        errorBuilder: (_, _, _) => const Center(
-          child: Text('Invalid image', style: TextStyle(color: Colors.white)),
-        ),
-      ),
+  Widget _invalidImage() => Center(
+    child: Text(
+      AppState.phrase('图片无法显示', 'Unable to display image'),
+      style: const TextStyle(color: Colors.white),
     ),
   );
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = _provider;
+    if (provider == null) return _invalidImage();
+    return InteractiveViewer(
+      transformationController: _controller,
+      panEnabled: _zoomed,
+      minScale: 1,
+      maxScale: 8,
+      child: SizedBox.expand(
+        child: Image(
+          image: provider,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => _invalidImage(),
+        ),
+      ),
+    );
+  }
 }

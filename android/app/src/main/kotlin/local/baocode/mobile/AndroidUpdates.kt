@@ -9,7 +9,8 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import androidx.core.content.FileProvider
-import io.flutter.embedding.android.FlutterActivity
+import android.app.Activity
+import android.content.Context
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -17,11 +18,14 @@ import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 /** 只安装本应用缓存目录中、同签名且构建号更高的正式更新。 */
-class AndroidUpdates(private val activity: FlutterActivity) : AutoCloseable {
+class AndroidUpdates(
+    private val context: Context,
+    private val activityProvider: () -> Activity?,
+) : AutoCloseable {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private var closed = false
-    private val directory get() = File(activity.cacheDir, "updates")
+    private val directory get() = File(context.cacheDir, "updates")
 
     fun handle(call: MethodCall, result: MethodChannel.Result): Boolean {
         when (call.method) {
@@ -54,6 +58,11 @@ class AndroidUpdates(private val activity: FlutterActivity) : AutoCloseable {
                     }
                     main.post {
                         if (closed) return@post
+                        val activity = activityProvider()
+                        if (activity == null) {
+                            result.error("no_activity", "The app must be open to install an update", null)
+                            return@post
+                        }
                         try {
                             if (Build.VERSION.SDK_INT >= 26 &&
                                 !activity.packageManager.canRequestPackageInstalls()) {
@@ -98,8 +107,8 @@ class AndroidUpdates(private val activity: FlutterActivity) : AutoCloseable {
         }
         val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES
             else PackageManager.GET_SIGNATURES
-        val manager = activity.packageManager
-        val installed = manager.getPackageInfo(activity.packageName, flags)
+        val manager = context.packageManager
+        val installed = manager.getPackageInfo(context.packageName, flags)
         // 部分系统版本读安装包文件时只有带上 GET_SIGNATURES 才会解析证书，
         // 两个标志一起传；读不到证书时 identity 给空集合，策略会拒绝安装。
         val candidate = requireNotNull(manager.getPackageArchiveInfo(file.path,

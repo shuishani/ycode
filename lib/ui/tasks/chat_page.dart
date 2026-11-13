@@ -74,12 +74,28 @@ class ChatPage extends StatefulWidget {
     this.botId,
     this.projectUnavailable = false,
     this.onSwitchProject,
+    this.leading,
+    this.onLeave,
+    this.onNewConversation,
+    this.onBack,
   });
   final bool projectUnavailable;
 
   /// A new conversation, not begun yet, may go to another project: this
   /// picks it and opens it in this page's place.
   final Future<void> Function(BuildContext context)? onSwitchProject;
+
+  /// 标题栏左边的按钮，换掉返回：沉浸模式里是打开侧边栏。
+  final Widget? leading;
+
+  /// 删除或归档后离开这段对话；不给就退回上一页。
+  final VoidCallback? onLeave;
+
+  /// 换成在原地开新对话，标题栏上也多一个按钮；不给就新开一页。
+  final VoidCallback? onNewConversation;
+
+  /// 返回键不离开这一页，换成做这件事：沉浸模式里是打开侧边栏。
+  final VoidCallback? onBack;
   final AppState state;
   final String desktopId, sessionId, title;
   final String? projectId, botId;
@@ -205,6 +221,7 @@ class _ChatPageState extends State<ChatPage> {
                 .firstOrNull
                 ?.bot
                 .session,
+      errorMessage: (error) => userMessage(widget.state, error),
       retain: (session) => widget.state.openSession(widget.desktopId, session),
       release: (session) =>
           widget.state.closeSession(widget.desktopId, session),
@@ -437,6 +454,7 @@ class _ChatPageState extends State<ChatPage> {
     if (!_online) return;
     switch (action) {
       case 'new':
+        if (widget.onNewConversation case final start?) return start();
         final project = _project;
         if (project == null) return;
         await newConversation(context, widget.state, project: project);
@@ -492,7 +510,7 @@ class _ChatPageState extends State<ChatPage> {
           sessionId: session,
           title: widget.title,
         );
-        if (deleted && mounted) Navigator.of(context).pop();
+        if (deleted && mounted) _leave();
       case 'archive':
         if (!mounted) return;
         final confirmed = await showDialog<bool>(
@@ -517,9 +535,12 @@ class _ChatPageState extends State<ChatPage> {
           'session': session,
         });
         if (!mounted) return;
-        Navigator.of(context).pop();
+        _leave();
     }
   }
+
+  void _leave() =>
+      widget.onLeave != null ? widget.onLeave!() : Navigator.of(context).pop();
 
   Future<void> _send() async {
     if (_sending ||
@@ -755,9 +776,14 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) => PopScope(
     // The back gesture closes the add panel before it leaves the page.
-    canPop: !_addOpen,
+    canPop: !_addOpen && widget.onBack == null,
     onPopInvokedWithResult: (didPop, _) {
-      if (!didPop) _closeAdd();
+      if (didPop) return;
+      if (_addOpen) {
+        _closeAdd();
+      } else {
+        widget.onBack?.call();
+      }
     },
     child: AnimatedBuilder(
       animation: widget.state,
@@ -961,13 +987,15 @@ class _ChatPageState extends State<ChatPage> {
             .toDouble(),
     centerTitle: widget.botId != null,
     titleSpacing: 4,
-    leading: widget.botId == null
-        ? null
-        : IconButton(
-            tooltip: tr('返回', 'Back'),
-            onPressed: () => Navigator.maybePop(context),
-            icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          ),
+    leading:
+        widget.leading ??
+        (widget.botId == null
+            ? null
+            : IconButton(
+                tooltip: tr('返回', 'Back'),
+                onPressed: () => Navigator.maybePop(context),
+                icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+              )),
     title: SessionSyncGate(
       online: _online,
       loading: buffer.loading,
@@ -1006,6 +1034,13 @@ class _ChatPageState extends State<ChatPage> {
             ),
     ),
     actions: [
+      if (bot == null && widget.onNewConversation != null)
+        IconButton(
+          key: const ValueKey('chat-new-conversation'),
+          tooltip: tr('新对话', 'New conversation'),
+          icon: const LucideIcon('square-pen', size: 22),
+          onPressed: _online ? widget.onNewConversation : null,
+        ),
       if (bot != null)
         IconButton(
           tooltip: tr('资料', 'Profile'),

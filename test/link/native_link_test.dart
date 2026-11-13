@@ -29,6 +29,16 @@ void main() {
     final attempt = await phone.pair(fixture.offer.uri);
     await phone.confirmPairing(attempt);
     expect(phone.onlineIds, {identity.id});
+    final hellos = fixture.calls
+        .where((method) => method == LinkMethods.hello)
+        .length;
+    await phone.verifyConnections();
+    expect(phone.onlineIds, {identity.id});
+    expect(
+      fixture.calls.where((method) => method == LinkMethods.hello),
+      hasLength(hellos),
+      reason: '真实 iroh 独立流探测成功，不应重连',
+    );
     final events = phone.events.firstWhere(
       (event) => event.name == LinkEvents.session,
     );

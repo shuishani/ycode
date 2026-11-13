@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:baocode_mobile/chat/chat_models.dart';
 import 'package:baocode_mobile/chat/message_view.dart';
 import 'package:baocode_mobile/chat/widgets/step_images.dart';
@@ -9,14 +7,12 @@ import 'package:flutter/services.dart';
 import 'package:baocode_mobile/state/app_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-final _png = base64Decode(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=',
-);
+import '../support/image_test_support.dart';
 
 /// 每张图字节不同（尾部附加序号），便于断言保存的是哪一张。
 List<GalleryImage> _images(int count) => [
   for (var i = 0; i < count; i++)
-    GalleryImage(Uint8List.fromList([..._png, i]), name: 'pic-$i.png'),
+    GalleryImage(testImageBytes(i), name: 'pic-$i.png'),
 ];
 
 Widget _app(Widget home) => MaterialApp(home: home);
@@ -37,15 +33,28 @@ Widget _opener(List<GalleryImage> images, int index, {GallerySaver? saver}) =>
       ),
     );
 
-Future<void> _swipe(WidgetTester tester, Offset by) async {
-  await tester.fling(find.byType(PageView), by, 1500);
-  await tester.pumpAndSettle();
-}
-
 void main() {
   // 这些文字跟着界面语言走；测试里按中文看。
   setUp(() => AppState.debugLanguage = 'zh');
   tearDown(() => AppState.debugLanguage = null);
+
+  test('附件转换保留文件名，并且只在取字节时加载', () {
+    var loads = 0;
+    final bytes = testImageBytes();
+    final attachment = ImageAttachment.lazy(
+      name: '合成附件.png',
+      mediaType: 'image/png',
+      loadBytes: () {
+        loads++;
+        return bytes;
+      },
+    );
+    final image = GalleryImage.fromAttachment(attachment);
+    expect(image.name, '合成附件.png');
+    expect(loads, 0);
+    expect(image.bytes, same(bytes));
+    expect(loads, 1);
+  });
 
   testWidgets('从点击的索引打开并显示 n / total 与文件名', (tester) async {
     await tester.pumpWidget(
@@ -53,6 +62,28 @@ void main() {
     );
     expect(find.text('3 / 3'), findsOneWidget);
     expect(find.text('pic-2.png'), findsOneWidget);
+  });
+
+  testWidgets('长对话图库只加载当前附近的图片，不提前解码远处的附件', (tester) async {
+    final loads = List.filled(10, 0);
+    final images = [
+      for (var i = 0; i < loads.length; i++)
+        GalleryImage.lazy(
+          name: '合成图片$i.png',
+          loadBytes: () {
+            loads[i]++;
+            return testImageBytes(i);
+          },
+        ),
+    ];
+    await tester.pumpWidget(_app(ImageGalleryPage(images: images)));
+    await tester.pumpAndSettle();
+    expect(loads.first, 1);
+    expect(loads.last, 0);
+    await swipeImageGallery(tester, const Offset(-400, 0));
+    expect(find.text('2 / 10'), findsOneWidget);
+    expect(loads[1], 1);
+    expect(loads.last, 0);
   });
 
   testWidgets('越界起始索引被夹到有效范围', (tester) async {
@@ -66,14 +97,14 @@ void main() {
     await tester.pumpWidget(
       _app(ImageGalleryPage(images: _images(3), initialIndex: 1)),
     );
-    await _swipe(tester, const Offset(-400, 0));
+    await swipeImageGallery(tester, const Offset(-400, 0));
     expect(find.text('3 / 3'), findsOneWidget);
-    await _swipe(tester, const Offset(-400, 0));
+    await swipeImageGallery(tester, const Offset(-400, 0));
     expect(find.text('3 / 3'), findsOneWidget);
-    await _swipe(tester, const Offset(400, 0));
-    await _swipe(tester, const Offset(400, 0));
+    await swipeImageGallery(tester, const Offset(400, 0));
+    await swipeImageGallery(tester, const Offset(400, 0));
     expect(find.text('1 / 3'), findsOneWidget);
-    await _swipe(tester, const Offset(400, 0));
+    await swipeImageGallery(tester, const Offset(400, 0));
     expect(find.text('1 / 3'), findsOneWidget);
   });
 
@@ -81,7 +112,7 @@ void main() {
     await tester.pumpWidget(_app(ImageGalleryPage(images: _images(1))));
     expect(find.text('1 / 1'), findsNothing);
     expect(find.text('pic-0.png'), findsOneWidget);
-    await _swipe(tester, const Offset(-400, 0));
+    await swipeImageGallery(tester, const Offset(-400, 0));
     expect(find.text('pic-0.png'), findsOneWidget);
   });
 
@@ -100,13 +131,14 @@ void main() {
         null,
       ),
     );
-    await tester.pumpWidget(_app(ImageGalleryPage(images: _images(3))));
-    await _swipe(tester, const Offset(-400, 0));
+    final images = _images(3);
+    await tester.pumpWidget(_app(ImageGalleryPage(images: images)));
+    await swipeImageGallery(tester, const Offset(-400, 0));
     await tester.tap(find.byTooltip('复制图片'));
     await tester.pump();
     expect(copied, isNotNull);
     expect(copied!['text'], '');
-    expect((copied!['image'] as Map)['bytes'], _images(3)[1].bytes);
+    expect((copied!['image'] as Map)['bytes'], images[1].bytes);
     expect((copied!['image'] as Map)['type'], 'image/png');
     expect(find.text('图片已复制'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -122,7 +154,7 @@ void main() {
         ),
       ),
     );
-    await _swipe(tester, const Offset(-400, 0));
+    await swipeImageGallery(tester, const Offset(-400, 0));
     await tester.tap(find.byTooltip('保存到相册'));
     await tester.pump();
     expect(saved, hasLength(1));
@@ -256,13 +288,15 @@ void main() {
     await tester.tap(find.byType(MemoryPicture).at(1));
     await tester.pumpAndSettle();
     expect(find.text('2 / 3'), findsOneWidget);
-    await _swipe(tester, const Offset(-400, 0));
+    await swipeImageGallery(tester, const Offset(-400, 0));
     expect(find.text('3 / 3'), findsOneWidget);
   });
 
   testWidgets('MemoryPicture 无分组时仍是单张画廊', (tester) async {
     await tester.pumpWidget(
-      _app(MemoryPicture(bytes: _png, name: 'solo.png', height: 40)),
+      _app(
+        MemoryPicture(bytes: testImageBytes(), name: 'solo.png', height: 40),
+      ),
     );
     await tester.tap(find.byType(MemoryPicture));
     await tester.pumpAndSettle();
@@ -291,32 +325,32 @@ void main() {
     await tester.tap(find.byType(MemoryPicture).at(3));
     await tester.pumpAndSettle();
     expect(find.text('1 / 2'), findsOneWidget);
-    await _swipe(tester, const Offset(-400, 0));
-    await _swipe(tester, const Offset(-400, 0));
+    await swipeImageGallery(tester, const Offset(-400, 0));
+    await swipeImageGallery(tester, const Offset(-400, 0));
     expect(find.text('2 / 2'), findsOneWidget);
   });
 
-  testWidgets('工具步骤缩略图同一组可左右翻看', (tester) async {
+  testWidgets('工具步骤的多图预览从所点图片打开并可左右翻看', (tester) async {
     final images = [
       for (var i = 0; i < 3; i++)
         ImageAttachment(
           name: 'step-$i.png',
           mediaType: 'image/png',
-          bytes: Uint8List.fromList([..._png, i]),
+          bytes: testImageBytes(i),
         ),
     ];
-    await tester.pumpWidget(
-      _app(Scaffold(body: StepThumbnails(images: images))),
-    );
+    await tester.pumpWidget(_app(Scaffold(body: ToolImages(images: images))));
+    await tester.tap(find.byKey(const ValueKey('image-deck-expand')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(Image).at(2));
     await tester.pumpAndSettle();
     expect(find.text('3 / 3'), findsOneWidget);
-    await _swipe(tester, const Offset(400, 0));
+    await swipeImageGallery(tester, const Offset(400, 0));
     expect(find.text('2 / 3'), findsOneWidget);
   });
 
   testWidgets('同一份字节重复出现在组内时，翻页与保存仍按页对应', (tester) async {
-    final shared = Uint8List.fromList([..._png, 7]);
+    final shared = testImageBytes(7);
     final saved = <Uint8List>[];
     await tester.pumpWidget(
       _app(

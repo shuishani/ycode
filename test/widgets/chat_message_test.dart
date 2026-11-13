@@ -44,15 +44,32 @@ void main() {
     ];
     await tester.pumpWidget(chatHost(state));
     await tester.pumpAndSettle();
+    // 底部按钮同宽才间距一致；∞ 略放大补偿它扁平的形状。
+    expect(
+      tester.getSize(find.byTooltip('添加附件')).width,
+      tester.getSize(find.byTooltip('模式: Agent')).width,
+    );
+    LucideIcon icon(Finder scope, String name) => tester.widget<LucideIcon>(
+      find.descendant(
+        of: scope,
+        matching: find.byWidgetPredicate(
+          (widget) => widget is LucideIcon && widget.name == name,
+        ),
+      ),
+    );
+    expect(icon(find.byTooltip('模式: Agent'), 'infinity').size, 22);
     await tester.tap(find.byTooltip('模式: Agent'));
     await tester.pumpAndSettle();
+    final panel = find.byKey(const ValueKey('dropdown-panel'));
+    expect(icon(panel, 'infinity').size, 24);
+    expect(icon(panel, 'message-circle').size, 22);
     expect(find.text('规划、编辑并运行代码'), findsOneWidget);
     expect(find.text('只讨论和解答，给出改动建议'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('dropdown-panel')),
         matching: find.byWidgetPredicate(
-          (widget) => widget is LucideIcon && widget.name == 'bot',
+          (widget) => widget is LucideIcon && widget.name == 'infinity',
         ),
       ),
       findsOneWidget,
@@ -754,6 +771,26 @@ void main() {
       expect(find.text('Unrecognized message'), findsOneWidget);
     },
   );
+
+  testWidgets('延后解码的损坏工具图片仍保留可展开的原始消息行', (tester) async {
+    final state = ChatPageState();
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      messageHost(state, {
+        't': 'tool',
+        'tool': '合成截图工具',
+        'images': [
+          {'data': '*invalid*', 'type': 'image/png'},
+        ],
+      }),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.text('Unrecognized message'), findsOneWidget);
+    expect(find.text('#7'), findsOneWidget);
+    await tester.tap(find.text('Unrecognized message'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('合成截图工具'), findsOneWidget);
+  });
 
   testWidgets(
     'a finished thought shows the desktop row, closed until opened by hand',

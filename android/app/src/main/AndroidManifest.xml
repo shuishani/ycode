@@ -7,6 +7,11 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 用户在设置里手动开启的后台保连接：手机与电脑之间的消息同步，类型为 remoteMessaging。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <!-- 只在用户点「允许后台运行」时弹系统确认框。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Saving received media to the gallery on Android 9 and below only. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -35,6 +40,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name=".KeepAliveService" android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.clipboard"
             android:exported="false" android:grantUriPermissions="true">

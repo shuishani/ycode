@@ -389,8 +389,8 @@ abstract final class ChatCodec {
   static List<ImageAttachment> _decodeImages(Object? json) => [
     for (final image in (json as List?) ?? const [])
       if (image case {'data': final String data, 'type': final String type})
-        ImageAttachment(
-          bytes: _imageBytes(image, data),
+        ImageAttachment.lazy(
+          loadBytes: () => _imageBytes(image, data),
           mediaType: type,
           name: image['name'] as String?,
           number: (image['n'] as num?)?.toInt(),

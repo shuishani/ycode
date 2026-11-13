@@ -55,8 +55,7 @@ class StepHeader extends StatelessWidget {
   /// After the line, e.g. an edit's "+12 -3".
   final Widget? trailing;
 
-  /// Between the line and [trailing]: none for one that keeps its own, to
-  /// go with it (a [StepThumbnails]'s).
+  /// 文字与 [trailing] 之间的间距；尾部组件自带间距时可设为零。
   final double trailingGap;
 
   /// A button after it all, apart from the click that opens it.

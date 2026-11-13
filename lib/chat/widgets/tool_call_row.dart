@@ -166,8 +166,7 @@ class ToolCallRow extends StatelessWidget {
   /// under what it said as they are.
   final List<ImageAttachment> images;
 
-  /// Where the CLI saved them (see [ToolCallItem.imageFiles]); the mobile
-  /// cannot read those yet, so they are not shown (see [chatImagesOf]).
+  /// CLI 保存的图片路径（见 [ToolCallItem.imageFiles]）；手机暂不按这些路径读取图片。
   final List<String> imageFiles;
 
   final bool expanded;
@@ -182,7 +181,7 @@ class ToolCallRow extends StatelessWidget {
   final void Function(String path)? onOpenFile;
 
   List<ImageAttachment> get _images =>
-      status == ToolStatus.failed ? const [] : chatImagesOf(images, imageFiles);
+      status == ToolStatus.failed ? const [] : images;
 
   bool get _running => status == ToolStatus.running;
 
@@ -261,10 +260,6 @@ class ToolCallRow extends StatelessWidget {
         ),
         _ => null,
       },
-      trailingGap: 0,
-      trailing: images.isEmpty || status == ToolStatus.failed
-          ? null
-          : StepThumbnails(images: _images, shown: !expanded),
       action: switch ((kind, _shown, onSetGoal)) {
         (ToolKind.goal, final condition?, final set?) when !_running =>
           _SetGoalButton(onTap: () => set(condition), strings: s),
@@ -292,7 +287,10 @@ class ToolCallRow extends StatelessWidget {
                     style: stepMono(context),
                   ),
           ),
-        if (expanded && images.isNotEmpty) ToolImages(images: _images),
+        if (_images.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          ToolImages(images: _images),
+        ],
       ],
     );
   }

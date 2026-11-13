@@ -26,6 +26,7 @@ class AppSettings {
 
   /// The system was asked once to let the app notify; not again unasked.
   bool notificationsAsked = false;
+  bool keepBackgroundConnection = false;
   bool haptics = true;
 
   /// Keeps an agent's changes as each of its turns ends, for every
@@ -40,6 +41,13 @@ class AppSettings {
   /// The bots pinned on the lists, as (desktop, bot): the phone's own choice,
   /// the desktop keeps no pin for a bot.
   Set<(String, String)> pinnedBots = {};
+
+  /// 界面模式：`list` 是对话列表，`focus` 打开就是对话、列表收在侧边栏。
+  String layout = 'list';
+  bool get focusLayout => layout == 'focus';
+
+  /// 沉浸模式下次打开时回到的对话，as (desktop, session).
+  (String, String)? lastSession;
   String name = '';
   String gender = '';
   String signature = '';
@@ -75,6 +83,8 @@ class AppSettings {
     settings.notifyDone = json['notifyDone'] as bool? ?? all;
     settings.notifyBots = json['notifyBots'] as bool? ?? all;
     settings.notificationsAsked = json['notificationsAsked'] == true;
+    settings.keepBackgroundConnection =
+        json['keepBackgroundConnection'] == true;
     settings.haptics = json['haptics'] != false;
     settings.autoKeep = json['autoKeepChanges'] == true;
     settings.homeSessions = {
@@ -86,6 +96,10 @@ class AppSettings {
       for (final entry in (json['pinnedBots'] as List?) ?? const [])
         if (entry case [final String desktop, final String bot]) (desktop, bot),
     };
+    settings.layout = json['layout'] == 'focus' ? 'focus' : 'list';
+    if (json['lastSession'] case [final String desktop, final String session]) {
+      settings.lastSession = (desktop, session);
+    }
     settings.name = json['name'] as String? ?? '';
     settings.gender = json['gender'] as String? ?? '';
     settings.signature = json['signature'] as String? ?? '';
@@ -105,6 +119,7 @@ class AppSettings {
     'notifyDone': notifyDone,
     'notifyBots': notifyBots,
     'notificationsAsked': notificationsAsked,
+    'keepBackgroundConnection': keepBackgroundConnection,
     'haptics': haptics,
     'autoKeepChanges': autoKeep,
     'homeSessions': [
@@ -113,6 +128,11 @@ class AppSettings {
     'pinnedBots': [
       for (final (desktop, bot) in pinnedBots) [desktop, bot],
     ],
+    'layout': layout,
+    'lastSession': switch (lastSession) {
+      (final desktop, final session) => [desktop, session],
+      null => null,
+    },
     'name': name,
     'gender': gender,
     'signature': signature,

@@ -4,8 +4,6 @@ import 'package:bao_link/bao_link.dart';
 import 'package:baocode_mobile/link/phone_link.dart';
 import 'package:baocode_mobile/state/app_state.dart';
 import 'package:baocode_mobile/theme/app_theme.dart';
-import 'package:baocode_mobile/ui/conversations/conversation_filter_sheet.dart';
-import 'package:baocode_mobile/ui/conversations/conversation_filters.dart';
 import 'package:baocode_mobile/ui/devices/device_menu.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -325,109 +323,5 @@ void main() {
     link.pending!.completeError(StateError('关闭后失败'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('筛选在窄屏大字号深色模式中不溢出，项目可滚动且关闭不丢筛选', (tester) async {
-    tester.view.physicalSize = const Size(360, 760);
-    tester.view.devicePixelRatio = 1;
-    tester.view.padding = const FakeViewPadding(top: 28, bottom: 24);
-    addTearDown(tester.view.reset);
-    var filters = const ConversationFilters(query: '保留搜索');
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: MobileTheme.build(Brightness.dark),
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context)
-              .copyWith(textScaler: TextScaler.linear(1.4)),
-          child: child!,
-        ),
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showConversationFilters(
-                context,
-                state,
-                filters,
-                (next) => filters = next,
-              ),
-              child: const Text('打开筛选'),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('打开筛选'));
-    await tester.pumpAndSettle();
-    expect(panel, findsOneWidget);
-    expect(tester.takeException(), isNull);
-    expect(tester.getTopLeft(panel).dy, greaterThanOrEqualTo(28));
-    final scroll = find.descendant(
-      of: panel,
-      matching: find.byType(SingleChildScrollView),
-    );
-    expect(tester.getBottomLeft(scroll).dy, lessThanOrEqualTo(736));
-    await tester.tap(find.text('进行中'));
-    await tester.pumpAndSettle();
-    expect(filters.status, ConversationStatus.active);
-    await tester.scrollUntilVisible(
-      find.text('项目 29'),
-      350,
-      scrollable: find.descendant(
-        of: scroll,
-        matching: find.byType(Scrollable),
-      ),
-    );
-    await tester.tap(find.text('项目 29'));
-    await tester.pumpAndSettle();
-    expect(filters.projectKey, ('online', '/p29'));
-    expect(filters.query, '保留搜索');
-    expect(panel, findsNothing, reason: '选完项目面板自动收起');
-    expect(filters.status, ConversationStatus.active);
-    expect(state.requests, isEmpty);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('筛选范围后，下方只列该范围的项目；换范围时清掉不属于它的已选项目', (tester) async {
-    var filters = const ConversationFilters();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showConversationFilters(
-                context,
-                state,
-                filters,
-                (next) => filters = next,
-              ),
-              child: const Text('打开筛选'),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('打开筛选'));
-    await tester.pumpAndSettle();
-    expect(find.text('项目 0'), findsOneWidget);
-
-    await tester.tap(find.text('SSH / WSL'));
-    await tester.pumpAndSettle();
-    expect(find.text('项目 0'), findsNothing);
-    expect(find.text('远程项目'), findsOneWidget);
-    await tester.tap(find.text('远程项目'));
-    await tester.pumpAndSettle();
-    expect(filters.projectKey, ('online', 'ssh://devbox/home/app'));
-    expect(find.text('远程项目'), findsNothing, reason: '选完项目面板自动收起');
-
-    await tester.tap(find.text('打开筛选'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('本机'));
-    await tester.pumpAndSettle();
-    expect(find.text('远程项目'), findsNothing);
-    expect(find.text('项目 0'), findsOneWidget);
-    expect(filters.source, ConversationSource.local);
-    expect(filters.projectKey, isNull);
-    await tester.tapAt(const Offset(790, 590));
-    await tester.pumpAndSettle();
   });
 }

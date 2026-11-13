@@ -7,15 +7,12 @@ import 'package:baocode_mobile/link/chat_codec.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-const _png =
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+import '../support/image_test_support.dart';
 
 Map<String, Object?> _wire() => {
   't': 'user',
   'text': '附图要求',
-  'images': [
-    {'name': 'example.png', 'type': 'image/png', 'data': _png},
-  ],
+  'images': [testImageWire('example.png')],
 };
 
 void main() {
@@ -39,7 +36,7 @@ void main() {
   });
 
   testWidgets('快照返回相同图片的新字节数组时复用已显示帧，不闪白', (tester) async {
-    final first = base64Decode(_png);
+    final first = testImageBytes();
     Widget page(Uint8List bytes) => MaterialApp(
       home: Scaffold(
         body: MemoryPicture(bytes: bytes, name: 'example.png'),

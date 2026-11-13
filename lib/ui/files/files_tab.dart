@@ -22,6 +22,7 @@ import '../widgets/dropdown_panel.dart';
 import 'file_source_view.dart';
 import 'diff_lines.dart';
 import 'line_diff.dart';
+import 'markdown_image.dart';
 import 'page_zoom.dart';
 import '../user_message.dart';
 
@@ -529,6 +530,33 @@ class _FileViewerPageState extends State<FileViewerPage> {
   List<RegExpMatch> _matches = const [];
   int _activeMatch = 0, _navigationRevision = 0;
   int? _targetLine;
+  final _pictures = <String, Future<Uint8List>>{};
+
+  Future<Uint8List> _picture(String path) =>
+      _pictures.putIfAbsent(path, () async {
+        final data = objectMap(
+          await widget.state.request(
+            widget.project.desktopId,
+            LinkMethods.image,
+            {'project': widget.project.project.id, 'path': path},
+          ),
+        );
+        final encoded = data['data'];
+        if (encoded is! String) throw const FormatException('no image data');
+        return base64Decode(encoded);
+      });
+
+  Widget _markdownImage(
+    String src,
+    String alt,
+    String? title, {
+    double? width,
+    double? height,
+  }) {
+    final path = markdownImagePath(widget.path, src);
+    if (path == null) return Text('[${alt.isEmpty ? 'image' : alt}]');
+    return MarkdownFileImage(bytes: _picture(path), alt: alt, width: width);
+  }
 
   bool get _markdown => RegExp(
     r'\.(md|markdown|mdown|mkd)$',
@@ -751,6 +779,7 @@ class _FileViewerPageState extends State<FileViewerPage> {
 
   void _load() {
     _search.clear();
+    _pictures.clear();
     _matches = const [];
     _targetLine = null;
     _searching = false;
@@ -1014,6 +1043,7 @@ class _FileViewerPageState extends State<FileViewerPage> {
                       headingSizes: MobileTheme.headingSizesOf(context),
                       gap: MobileTheme.markdownGap,
                       inlineCodeStyle: MobileTheme.codeStyleOf(context),
+                      image: _markdownImage,
                     ),
                   ),
                 ),

@@ -88,13 +88,28 @@ class TurnOutput {
 /// A picture sent with a message.
 class ImageAttachment {
   const ImageAttachment({
-    required this.bytes,
+    required Uint8List this._bytes,
     required this.mediaType,
     this.name,
     this.number,
-  });
+  }) : _loadBytes = null;
 
-  final Uint8List bytes;
+  ImageAttachment.lazy({
+    required Uint8List Function() this._loadBytes,
+    required this.mediaType,
+    this.name,
+    this.number,
+  }) : _bytes = null;
+
+  final Uint8List? _bytes;
+  final Uint8List Function()? _loadBytes;
+
+  Uint8List get bytes => _bytes ?? _loadBytes!();
+
+  /// 可见消息在自身的错误边界内加载，损坏的附件仍保留原来的兜底行。
+  void load() {
+    _loadBytes?.call();
+  }
 
   /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
   final String mediaType;

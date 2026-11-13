@@ -28,6 +28,7 @@ class SessionSubscriptions {
   final _buffers = <SessionKey, SessionBuffer>{};
   final _references = <SessionKey, int>{};
   final _operations = <SessionKey, _ReadOperation>{};
+  final _baselines = <SessionKey>{};
   bool _disposed = false;
 
   SessionBuffer buffer(String desktop, String session) => _buffers.putIfAbsent((
@@ -101,6 +102,7 @@ class SessionSubscriptions {
         for (final update in operation.updates) {
           target.apply(update);
         }
+        _baselines.add(key);
       } on Object {
         if (!_current(key, operation)) return;
         target.error = tr('内容没有更新，请重试', 'Could not refresh. Try again.');
@@ -117,10 +119,17 @@ class SessionSubscriptions {
   }
 
   /// 回前台仅核对仍有页面订阅的会话，沿用 refresh 的并发去重和旧响应隔离。
-  Future<void> refreshRetained(bool Function(String desktop) isOnline) async {
+  Future<void> refreshRetained(
+    bool Function(String desktop) isOnline, {
+    bool Function(String desktop, String session)? keepCurrent,
+  }) async {
     await Future.wait([
       for (final key in _references.keys.toList())
-        if (isOnline(key.$1))
+        if (isOnline(key.$1) &&
+            !(keepCurrent?.call(key.$1, key.$2) == true &&
+                _baselines.contains(key) &&
+                !_operations.containsKey(key) &&
+                _buffers[key]?.error == null))
           () async {
             try {
               await refresh(key.$1, key.$2);
@@ -219,6 +228,7 @@ class SessionSubscriptions {
       identical(_operations[key], operation);
 
   void _invalidate(SessionKey key) {
+    _baselines.remove(key);
     _operations.remove(key);
     final target = _buffers[key];
     if (target != null) {
@@ -240,6 +250,7 @@ class SessionSubscriptions {
   void dispose() {
     _disposed = true;
     _operations.clear();
+    _baselines.clear();
     _references.clear();
     _buffers.clear();
   }

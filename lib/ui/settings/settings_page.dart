@@ -121,6 +121,15 @@ class SettingsPage extends StatelessWidget {
               ),
               Builder(
                 builder: (anchor) => SettingsRow(
+                  state.tr('界面模式', 'Layout'),
+                  key: const ValueKey('settings-layout'),
+                  icon: 'panel-left',
+                  value: _layoutLabel(state.settings.layout),
+                  onTap: () => _layout(anchor),
+                ),
+              ),
+              Builder(
+                builder: (anchor) => SettingsRow(
                   state.tr('语言', 'Language'),
                   icon: 'languages',
                   value: switch (state.settings.language) {
@@ -186,6 +195,27 @@ class SettingsPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _layoutLabel(String layout) =>
+      layout == 'focus' ? state.tr('沉浸', 'Focus') : state.tr('列表', 'List');
+
+  /// 列表：先看项目和对话列表；沉浸：打开就是对话，列表收进侧边栏。
+  Future<void> _layout(BuildContext context) async {
+    final selected = await showMenuPanel<String>(context, [
+      for (final layout in const ['list', 'focus'])
+        MenuPanelItem(
+          layout,
+          _layoutLabel(layout),
+          key: ValueKey('layout-$layout'),
+          selected: layout == state.settings.layout,
+        ),
+    ], width: 180);
+    if (selected == null || !context.mounted) return;
+    await runUi(context, () async {
+      state.settings.layout = selected;
+      await state.saveSettings();
+    });
   }
 
   Future<void> _language(BuildContext context) async {
@@ -589,16 +619,23 @@ class _NotificationsPageState extends State<NotificationsPage>
     with WidgetsBindingObserver {
   static const _platform = MethodChannel('local.baocode.mobile/platform');
   bool? _permission;
+  bool _battery = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.state.addListener(_changed);
     _check();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    widget.state.removeListener(_changed);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -624,6 +661,14 @@ class _NotificationsPageState extends State<NotificationsPage>
     } on MissingPluginException {
       if (mounted) setState(() => _permission = false);
     }
+    try {
+      final battery = await _platform.invokeMethod<bool>('batteryUnrestricted');
+      if (mounted) setState(() => _battery = battery ?? true);
+    } on PlatformException {
+      // 读不到就不提示，不影响通知开关。
+    } on MissingPluginException {
+      // 同上。
+    }
   }
 
   /// Asks the system; once it has been refused for good it no longer asks,
@@ -647,6 +692,61 @@ class _NotificationsPageState extends State<NotificationsPage>
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          GroupCard(
+            children: [
+              SwitchListTile(
+                key: const ValueKey('background-connection'),
+                title: Text(
+                  state.tr('后台保持电脑连接', 'Keep desktop connection in background'),
+                ),
+                subtitle: Text(
+                  state.tr(
+                    '开启后显示常驻通知并增加耗电；系统仍可能限制后台运行。',
+                    'Uses a persistent notification and more battery. The system may still limit background activity.',
+                  ),
+                ),
+                value: state.demo
+                    ? state.settings.keepBackgroundConnection
+                    : state.background.running,
+                onChanged: _permission == null
+                    ? null
+                    : (value) => runUi(context, () async {
+                        if (value && blocked && !await _allow()) return;
+                        await state.setBackgroundConnection(value);
+                        if (value && !_battery) {
+                          await _platform.invokeMethod<void>(
+                            'requestBatteryUnrestricted',
+                          );
+                        }
+                      }),
+              ),
+              if (state.background.error case final error?)
+                ListTile(title: Text(userMessage(state, error))),
+              if (!_battery &&
+                  (state.demo
+                      ? state.settings.keepBackgroundConnection
+                      : state.background.running))
+                ListTile(
+                  key: const ValueKey('battery-unrestricted'),
+                  title: Text(state.tr('允许后台运行', 'Allow background activity')),
+                  subtitle: Text(
+                    state.tr(
+                      '系统仍在为 YCode 省电，锁屏久了可能断开。部分手机还要在应用设置里允许自启动和后台运行。',
+                      'The system still saves battery for YCode and may disconnect it after a while locked. Some phones also need auto-start and background activity allowed in app settings.',
+                    ),
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => runUi(context, () async {
+                      await _platform.invokeMethod<void>(
+                        'requestBatteryUnrestricted',
+                      );
+                    }),
+                    child: Text(state.tr('去允许', 'Allow')),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: MobileSpace.md),
           GroupCard(
             children: [
               for (final (key, zh, en, on, set) in [
@@ -720,8 +820,8 @@ class _NotificationsPageState extends State<NotificationsPage>
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Text(
               state.tr(
-                'App 打开时或刚切到后台时会提醒；被系统挂起后暂时收不到，要等中转服务上线。',
-                'Reminders come while the app is open or just went to the background; once the system suspends it they stop until the relay service is up.',
+                '收到电脑更新后由手机提醒，不依赖推送服务器。可在系统应用设置中允许后台活动；进程被结束后需重新打开 App，并重新开启后台模式；返回时会核对并恢复内容。',
+                'The phone notifies after receiving desktop updates, without a push server. Allow background activity in system app settings if needed. Reopen the app and enable background mode again after its process is ended; returning checks and restores content.',
               ),
               style: MobileTheme.hintStyleOf(context),
             ),

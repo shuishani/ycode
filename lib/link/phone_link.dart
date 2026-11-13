@@ -239,6 +239,9 @@ class PhoneLink extends ChangeNotifier {
   final _inflight = <KeptDesktop>[];
   final _desktops = <String, KeptDesktop>{};
   final _peers = <String, LinkPeer>{};
+  final _replies = <LinkPeer, int>{};
+  final _verifying = <LinkPeer, Future<void>>{};
+  int _requestSerial = 0;
   final _paths = <String, LinkPath>{};
   final _pathSubscriptions = <String, StreamSubscription<LinkPath>>{};
   final _opening = <LinkPeer>{};
@@ -259,6 +262,9 @@ class PhoneLink extends ChangeNotifier {
 
   List<KeptDesktop> get desktops => List.unmodifiable(_desktops.values);
   Set<String> get onlineIds => Set.unmodifiable(_peers.keys);
+
+  /// 本地拨号代次：恢复期间已重建连接的订阅不必再次打开。
+  int connectionGenerationOf(String desktopId) => _generations[desktopId] ?? 0;
 
   /// The way the connection to [desktopId] runs now; [LinkPath.none] when
   /// it is not connected or the path is not known yet.
@@ -293,7 +299,12 @@ class PhoneLink extends ChangeNotifier {
   }) async {
     await Future.wait([
       for (final MapEntry(key: id, value: peer) in _peers.entries.toList())
-        _verify(id, peer, timeout, quietFor),
+        _verifying.putIfAbsent(
+          peer,
+          () => _verify(id, peer, timeout, quietFor).whenComplete(() {
+            _verifying.remove(peer);
+          }),
+        ),
     ]);
   }
 
@@ -304,18 +315,24 @@ class PhoneLink extends ChangeNotifier {
     Duration quietFor,
   ) async {
     bool current() => !_disposed && _peers[id] == peer;
+    final request = ++_requestSerial;
     final showing = Timer(quietFor, () {
       if (current() && _connecting.add(id)) _changed();
     });
     var alive = true;
     try {
-      final state = _map(await peer.call(LinkMethods.state, const {}, timeout));
+      final state = _map(await peer.probe(timeout));
+      _replied(id, peer, request);
       if (current()) {
         _states[id] = Map.unmodifiable(state);
         _adoptPolicy(id, state);
       }
     } on LinkRemoteException {
       // It answered, whatever it answered: the connection is alive.
+      _replied(id, peer, request);
+    } on TimeoutException {
+      // 只认探测后发起的往返，不能用旧请求的迟到回复保活。
+      alive = (_replies[peer] ?? 0) > request;
     } on Object {
       alive = false;
     } finally {
@@ -793,12 +810,26 @@ class PhoneLink extends ChangeNotifier {
     String desktopId,
     String method, [
     Map<String, Object?> params = const {},
-  ]) {
+  ]) async {
     _checkAlive();
     final peer = _peers[desktopId];
-    if (peer == null) return Future.error(const LinkClosedException());
+    if (peer == null) throw const LinkClosedException();
     // Never replay RPCs: a lost answer does not mean a write did not happen.
-    return peer.call(method, params);
+    final request = ++_requestSerial;
+    try {
+      final result = await peer.call(method, params);
+      _replied(desktopId, peer, request);
+      return result;
+    } on LinkRemoteException {
+      _replied(desktopId, peer, request);
+      rethrow;
+    }
+  }
+
+  void _replied(String id, LinkPeer peer, int request) {
+    if (!_disposed && _peers[id] == peer && request > (_replies[peer] ?? 0)) {
+      _replies[peer] = request;
+    }
   }
 
   /// 在线时复用既有认证连接；另开 hello 会让桌面关闭当前连接。
@@ -818,6 +849,7 @@ class PhoneLink extends ChangeNotifier {
     _checkAlive();
     final peer = _peers[desktopId];
     if (peer == null) throw const LinkClosedException();
+    final request = ++_requestSerial;
     final reply = await peer.call(
       LinkMethods.state,
       const {},
@@ -825,6 +857,7 @@ class PhoneLink extends ChangeNotifier {
     );
     _checkAlive();
     if (_peers[desktopId] != peer) throw const LinkClosedException();
+    _replied(desktopId, peer, request);
     final state = _map(reply);
     if (state['projects'] is! List) {
       throw const FormatException('电脑状态响应无效');
@@ -943,6 +976,7 @@ class PhoneLink extends ChangeNotifier {
     });
     unawaited(
       peer.done.then((_) {
+        _replies.remove(peer);
         if (_disposed || _peers[id] != peer) return;
         _peers.remove(id);
         _dropPath(id);
@@ -993,7 +1027,9 @@ class PhoneLink extends ChangeNotifier {
 
   Future<void> _refreshState(String id, LinkPeer peer) async {
     final before = _states[id];
+    final request = ++_requestSerial;
     final state = _map(await peer.call(LinkMethods.state));
+    _replied(id, peer, request);
     if (_disposed || _peers[id] != peer || !identical(_states[id], before)) {
       return;
     }
@@ -1208,6 +1244,8 @@ class PhoneLink extends ChangeNotifier {
       unawaited(peer.close());
     }
     _peers.clear();
+    _replies.clear();
+    _verifying.clear();
     for (final subscription in _pathSubscriptions.values) {
       unawaited(subscription.cancel());
     }

@@ -191,7 +191,7 @@ void main() {
     expect(state.settings.notifications, isTrue);
     await tester.pumpWidget(MaterialApp(home: NotificationsPage(state: state)));
     await tester.pumpAndSettle();
-    expect(find.byType(SwitchListTile), findsNWidgets(3));
+    expect(find.byType(SwitchListTile), findsNWidgets(4));
     for (final tile in tester.widgetList<SwitchListTile>(
       find.byType(SwitchListTile),
     )) {
@@ -203,11 +203,20 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
-    for (final tile in tester.widgetList<SwitchListTile>(
-      find.byType(SwitchListTile),
-    )) {
-      expect(tile.value, isTrue);
+    for (final key in ['notify-needs-input', 'notify-done', 'notify-bots']) {
+      expect(
+        tester.widget<SwitchListTile>(find.byKey(ValueKey(key))).value,
+        isTrue,
+      );
     }
+    expect(
+      tester
+          .widget<SwitchListTile>(
+            find.byKey(const ValueKey('background-connection')),
+          )
+          .value,
+      isFalse,
+    );
     expect(find.text('智能体需要我处理时'), findsOneWidget);
     expect(find.text('智能体完成时'), findsOneWidget);
     expect(find.text('Bot 发来消息时'), findsOneWidget);

@@ -949,6 +949,8 @@ extension _Composer on _ChatPageState {
                                 .colorScheme
                                 .onSurfaceVariant,
                             tooltip: tr('添加附件', 'Add attachment'),
+                            // 和后面的选项按钮同为紧凑尺寸，图标间距才一致。
+                            visualDensity: VisualDensity.compact,
                             onPressed: _sending || _picking ? null : _toggleAdd,
                             icon: const LucideIcon('plus', size: 22),
                           ),

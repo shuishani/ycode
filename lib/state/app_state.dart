@@ -18,6 +18,7 @@ import 'task_output_subscriptions.dart';
 import 'conversation_input.dart';
 import 'bot_settings.dart';
 import 'desktop_notifications.dart';
+import 'background_connection.dart';
 
 export '../models/app_settings.dart';
 export '../models/session_buffer.dart';
@@ -55,9 +56,15 @@ class AppState extends ChangeNotifier {
     PhoneLink? link,
     this.demo = false,
     IconCache? icons,
+    BackgroundConnection? background,
   }) : _store = store ?? PlatformLinkStore(),
-       icons = icons ?? IconCache() {
+       icons = icons ?? IconCache(),
+       background = background ?? BackgroundConnection() {
     this.link = link ?? PhoneLink(store: _store);
+    this.background
+      ..onNetworkChanged = networkChanged
+      ..onStopped = _backgroundStopped
+      ..addListener(_notify);
     _subscriptions = SessionSubscriptions(
       request: (desktop, method, params) => request(desktop, method, params),
       onChanged: _sessionsChanged,
@@ -96,7 +103,11 @@ class AppState extends ChangeNotifier {
   final DesktopDiscovery discovery = DesktopDiscovery();
   final _discoveredAddresses = <String, String>{};
   bool foreground = true;
-  Future<void>? _resuming;
+  final BackgroundConnection background;
+  Map<String, int> _backgroundGenerations = {};
+  bool _resumeMayReuse = false;
+  int _networkRevision = 0;
+  Future<void>? _checkingConnections;
 
   void _discoveryChanged() {
     for (final advert in discovery.desktops) {
@@ -134,6 +145,9 @@ class AppState extends ChangeNotifier {
 
   /// 手机上看过的对话和看时的更新时间。电脑端不一定知道手机看过，不能只信它的未读。
   final _seenSessions = <String, int>{};
+
+  /// 开在屏幕上的对话，键同 [_seenSessions]，值是开着它的页面数。
+  final _viewing = <String, int>{};
   Future<void> _seenWrites = Future.value();
 
   /// 对话最近用的模型，手机自己记着：电脑只说它开着的对话用什么模型，别的
@@ -162,7 +176,7 @@ class AppState extends ChangeNotifier {
   final _botCreations = <String, BotProfileSaver>{};
   Future<void> _draftWrites = Future.value();
   Set<String> _lastOnline = {};
-  final _sessionStatuses = <(String, String), LinkSessionStatus>{};
+  final _sessionStatuses = <(String, String), SessionSummary>{};
   late final DesktopNotifications notifications;
 
   static const _platform = MethodChannel('local.baocode.mobile/platform');
@@ -365,6 +379,14 @@ class AppState extends ChangeNotifier {
         link.addListener(_linkChanged);
         _events = link.events.listen(_event);
         await link.initialize();
+        await background.initialize();
+        if (settings.keepBackgroundConnection &&
+            !background.running &&
+            background.error == null) {
+          // 冷启动不擅自重开已停止的服务，以原生实际状态为准。
+          settings.keepBackgroundConnection = false;
+          await saveSettings();
+        }
         discovery.addListener(_discoveryChanged);
         unawaited(discovery.start().catchError((Object _) {}));
       }
@@ -439,27 +461,24 @@ class AppState extends ChangeNotifier {
     for (final ref in sessions) {
       final key = (ref.desktopId, ref.session.id);
       final previous = _sessionStatuses[key];
-      final next = ref.session.status;
-      if (previous != null &&
-          previous != next &&
-          (next == LinkSessionStatus.needsInput ||
-              (previous == LinkSessionStatus.running &&
-                  next == LinkSessionStatus.idle))) {
+      final next = ref.session;
+      if (DesktopNotifications.turnNotice(previous, next)
+          case final needsInput?) {
         unawaited(
           notifications.notifyTurn(
             desktopId: ref.desktopId,
-            sessionId: ref.session.id,
-            sessionTitle: ref.session.title,
-            needsInput: next == LinkSessionStatus.needsInput,
+            sessionId: next.id,
+            sessionTitle: next.title,
+            needsInput: needsInput,
             foreground: foreground,
             demo: demo,
             desktopName: desktopName(ref.desktopId),
           ),
         );
       }
-      if (previous == LinkSessionStatus.running &&
-          next == LinkSessionStatus.idle) {
-        _autoKeep(ref.desktopId, ref.session.id);
+      if (previous?.status == LinkSessionStatus.running &&
+          next.status == LinkSessionStatus.idle) {
+        _autoKeep(ref.desktopId, next.id);
       }
       _sessionStatuses[key] = next;
     }
@@ -544,7 +563,10 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> openSession(String desktopId, String sessionId) {
+    // 先记下看过，再算正在看：正在看的不算未读，就不会再写进存储。
     _markSessionSeen(desktopId, sessionId);
+    final key = '$desktopId/$sessionId';
+    _viewing[key] = (_viewing[key] ?? 0) + 1;
     return _subscriptions.retain(desktopId, sessionId);
   }
 
@@ -552,6 +574,12 @@ class AppState extends ChangeNotifier {
       _subscriptions.refresh(desktopId, sessionId);
 
   Future<void> closeSession(String desktopId, String sessionId) {
+    final key = '$desktopId/$sessionId';
+    if ((_viewing[key] ?? 0) <= 1) {
+      _viewing.remove(key);
+    } else {
+      _viewing[key] = _viewing[key]! - 1;
+    }
     // 开着的时候做完的，关掉时也算看过了。
     _markSessionSeen(desktopId, sessionId);
     return _subscriptions.release(
@@ -564,7 +592,10 @@ class AppState extends ChangeNotifier {
   /// 做完还没看：手机上看过之后，要它再有更新才算。
   bool sessionUnread(SessionRef ref) {
     if (!ref.session.unread) return false;
-    final seen = _seenSessions['${ref.desktopId}/${ref.session.id}'];
+    final key = '${ref.desktopId}/${ref.session.id}';
+    // 正开在前台屏幕上的，做完时就看着，不算没看；沉浸模式下它一直开着。
+    if (foreground && _viewing.containsKey(key)) return false;
+    final seen = _seenSessions[key];
     return seen == null || ref.session.updatedAt.millisecondsSinceEpoch > seen;
   }
 
@@ -891,20 +922,104 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> resume() {
-    if (demo || _disposed) return Future<void>.value();
-    return _resuming ??= _resume().whenComplete(() => _resuming = null);
+  void setForeground(bool value) {
+    if (_disposed || foreground == value) return;
+    foreground = value;
+    if (!value) {
+      _backgroundGenerations = {
+        for (final desktop in desktops)
+          desktop.id: link.connectionGenerationOf(desktop.id),
+      };
+      background.beginBackground();
+    }
   }
 
-  Future<void> _resume() async {
-    link.networkChanged();
-    unawaited(discovery.refresh().catchError((Object _) {}));
-    final checking = link.verifyConnections().catchError((Object _) {});
-    final syncing = _subscriptions.refreshRetained(isOnline);
-    for (final desktop in desktops.where((d) => !isOnline(d.id))) {
-      unawaited(link.reconnect(desktop.id).catchError((Object _) {}));
+  Future<void> _startBackgroundConnection() => background.start(
+    title: tr('YCode 后台连接', 'YCode background connection'),
+    body: tr(
+      '保持电脑连接，接收任务更新。点按返回，或停止后台连接。',
+      'Keeping the desktop connection for task updates. Tap to return, or stop background connection.',
+    ),
+    stopLabel: tr('停止', 'Stop'),
+  );
+
+  Future<void> setBackgroundConnection(bool enabled) async {
+    if (!demo) {
+      if (enabled) {
+        await _startBackgroundConnection();
+      } else {
+        await background.stop();
+      }
     }
-    await Future.wait([checking, syncing]);
+    settings.keepBackgroundConnection = enabled;
+    await saveSettings();
+  }
+
+  void _backgroundStopped() {
+    if (_disposed || !settings.keepBackgroundConnection) return;
+    settings.keepBackgroundConnection = false;
+    unawaited(saveSettings().catchError(background.reportError));
+  }
+
+  /// 系统报告切网时先让 iroh 更新路径；保持同一连接，不盲目重开会话。
+  void networkChanged() {
+    if (demo || _disposed) return;
+    _networkRevision++;
+    _resumeMayReuse = false;
+    background.invalidate();
+    link.networkChanged();
+    unawaited(_checkConnections());
+    for (final desktop in desktops.where((d) => !isOnline(d.id))) {
+      unawaited(link.retryNow(desktop.id).catchError((Object _) {}));
+    }
+  }
+
+  Future<void> resume() {
+    if (demo || _disposed) return Future<void>.value();
+    link.networkChanged();
+    final generations = {
+      for (final desktop in desktops)
+        desktop.id: link.connectionGenerationOf(desktop.id),
+    };
+    for (final desktop in desktops.where((d) => !isOnline(d.id))) {
+      unawaited(link.retryNow(desktop.id).catchError((Object _) {}));
+    }
+    final continuous = background.finishBackground();
+    if (_checkingConnections == null) {
+      _resumeMayReuse = continuous;
+      unawaited(discovery.refresh().catchError((Object _) {}));
+    }
+    return _resume(
+      _checkConnections(),
+      generations,
+      reusable: _resumeMayReuse ? Map.of(_backgroundGenerations) : const {},
+      networkRevision: _networkRevision,
+    );
+  }
+
+  Future<void> _checkConnections() => _checkingConnections ??= link
+      .verifyConnections()
+      .catchError((Object _) {})
+      .whenComplete(() => _checkingConnections = null);
+
+  Future<void> _resume(
+    Future<void> checking,
+    Map<String, int> generations, {
+    required Map<String, int> reusable,
+    required int networkRevision,
+  }) async {
+    await checking;
+    if (_disposed) return;
+    // 重连已恢复的订阅不再重开；仍在同步的会话由订阅层合并请求。
+    await _subscriptions.refreshRetained(
+      (id) =>
+          isOnline(id) &&
+          (generations[id] ?? 0) == link.connectionGenerationOf(id),
+      keepCurrent: (id, _) =>
+          networkRevision == _networkRevision &&
+          reusable[id] != null &&
+          reusable[id] == link.connectionGenerationOf(id),
+    );
   }
 
   Future<void> haptic([String kind = 'tap']) async {
@@ -921,6 +1036,8 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _events?.cancel();
+    background.removeListener(_notify);
+    background.dispose();
     _subscriptions.dispose();
     taskOutputs.dispose();
     localQueue.dispose();

@@ -25,6 +25,21 @@ class DesktopNotifications {
   /// 同一进程里每条 Bot 通知最多提醒一次。
   final _botNotices = BotNoticeTracker();
 
+  /// 对话从 [before] 变成 [after] 该不该提醒：`true` 是等你处理，`false` 是
+  /// 一轮做完，`null` 不提醒。电脑合并推送或手机断线时可能看不到「运行中」，
+  /// 所以新变成未读也算做完。第一次见到的对话不提醒。
+  static bool? turnNotice(SessionSummary? before, SessionSummary after) {
+    if (before == null) return null;
+    if (after.status == LinkSessionStatus.needsInput) {
+      return before.status == LinkSessionStatus.needsInput ? null : true;
+    }
+    if (after.status != LinkSessionStatus.idle) return null;
+    return before.status == LinkSessionStatus.running ||
+            (after.unread && !before.unread)
+        ? false
+        : null;
+  }
+
   /// 一条对话一轮做完或卡在等用户：发一条通知，除非不应打扰。
   Future<void> notifyTurn({
     required String desktopId,

@@ -67,7 +67,7 @@ class _MobileAppState extends State<MobileApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    widget.state.foreground = state == AppLifecycleState.resumed;
+    widget.state.setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) unawaited(widget.state.resume());
   }
 

@@ -150,10 +150,9 @@ extension _BotMessage on MessageView {
                   child: Builder(
                     builder: (anchor) => ImageDeck(
                       key: const ValueKey('bot-user-images'),
-                      images: [
-                        for (final image in value.images)
-                          GalleryImage(image.bytes, name: image.name),
-                      ],
+                      images: value.images
+                          .map(GalleryImage.fromAttachment)
+                          .toList(),
                       tr: state.tr,
                       onLongPress: () => press(anchor),
                     ),

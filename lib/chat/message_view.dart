@@ -113,6 +113,60 @@ class MessageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final content = _build(context);
+    return sessionId == null || index == null
+        ? content
+        : ImageGalleryScope(resolve: _gallerySelection, child: content);
+  }
+
+  GallerySelection _gallerySelection(GallerySelection selected) {
+    final session = sessionId;
+    final source = index;
+    if (session == null || source == null) return selected;
+    final items = state.buffer(desktopId, session).items;
+    if (source < 0 || source >= items.length) return selected;
+    final ChatItem? sourceItem;
+    try {
+      sourceItem = items[source] is ChatItem
+          ? items[source] as ChatItem
+          : ChatCodec.decode(items[source]);
+    } on Object {
+      return selected;
+    }
+    // 用户消息和待发附件保留原分组；只有分散在步骤里的工具截图按会话串联。
+    if (sourceItem is! ToolCallItem) return selected;
+    final images = <GalleryImage>[];
+    int? initialIndex;
+    for (var i = 0; i < items.length; i++) {
+      final ChatItem? decoded;
+      try {
+        decoded = items[i] is ChatItem
+            ? items[i] as ChatItem
+            : ChatCodec.decode(items[i]);
+      } on Object {
+        // 无法识别的消息仍由原消息行展示，不把它当成图片。
+        continue;
+      }
+      final attachments = switch (decoded) {
+        ToolCallItem(:final images, :final status)
+            when status != ToolStatus.failed =>
+          images,
+        _ => const <ImageAttachment>[],
+      };
+      if (i == source &&
+          selected.index >= 0 &&
+          selected.index < attachments.length) {
+        initialIndex = images.length + selected.index;
+      }
+      images.addAll(attachments.map(GalleryImage.fromAttachment));
+    }
+    // 不提前解码整段历史的图片，也不跨会话寻找相同字节；重复附件保留各自位置。
+    return initialIndex == null
+        ? selected
+        : (images: images, index: initialIndex);
+  }
+
+  Widget _build(BuildContext context) {
     if (!showItem) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
@@ -124,7 +178,15 @@ class MessageView extends StatelessWidget {
     ChatItem? decoded;
     try {
       decoded = item is ChatItem ? item as ChatItem : ChatCodec.decode(item);
+      final images = switch (decoded) {
+        UserMessageItem(:final images) || ToolCallItem(:final images) => images,
+        _ => const <ImageAttachment>[],
+      };
+      for (final image in images) {
+        image.load();
+      }
     } catch (_) {
+      decoded = null;
       /* Malformed or newer wire items still occupy a visible row. */
     }
     final value = decoded;
@@ -258,10 +320,7 @@ class MessageView extends StatelessWidget {
 
   Widget _images(List<ImageAttachment> attachments) {
     // 同一条消息的图片共用一个画廊，点开后可左右翻看。
-    final group = [
-      for (final image in attachments)
-        GalleryImage(image.bytes, name: image.name),
-    ];
+    final group = attachments.map(GalleryImage.fromAttachment).toList();
     if (group.length > 1) return ImageDeck(images: group, tr: state.tr);
     // 尺寸先占好：解码完才知道比例的话，整段消息会在解码后变高。
     return MemoryPicture(

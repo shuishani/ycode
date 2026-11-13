@@ -5,6 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('后台连接默认关闭，用户选择可以保存和读取', () {
+    expect(AppSettings.fromJson({}).keepBackgroundConnection, isFalse);
+    final original = AppSettings()..keepBackgroundConnection = true;
+    expect(
+      AppSettings.fromJson(original.toJson()).keepBackgroundConnection,
+      isTrue,
+    );
+  });
+
   test('existing settings gain the default code size without losing scale', () {
     final settings = AppSettings.fromJson({
       'textScale': 0.95,

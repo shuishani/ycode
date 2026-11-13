@@ -20,11 +20,15 @@ class ProjectIconView extends StatelessWidget {
     required this.state,
     required this.ref,
     this.size = MobileSizes.avatar,
+    this.showBadge = true,
   });
 
   final AppState state;
   final ProjectRef ref;
   final double size;
+
+  /// 文件夹角标；侧边栏的小图标在项目分组的标题上，用不着它。
+  final bool showBadge;
 
   static const _muted = Color(0xFF91A8AF);
 
@@ -99,6 +103,7 @@ class ProjectIconView extends StatelessWidget {
         },
       ),
     };
+    if (!showBadge) return icon;
     // 右下角的文件夹角标：不管画的是什么，都看得出这是项目。右上角留给待办数。
     final scheme = Theme.of(context).colorScheme;
     final badge = size * .4;

@@ -17,11 +17,17 @@ class ConversationBinding extends ChangeNotifier {
     required this.release,
     required this.refreshSession,
     this.verifyTarget,
+    this.errorMessage,
     this._sessionId,
   });
 
   final Future<void> Function(String session) retain, release, refreshSession;
   final Future<ConversationTarget> Function()? verifyTarget;
+  final String Function(Object error)? errorMessage;
+
+  String _message(Object error) =>
+      errorMessage?.call(error) ??
+      AppState.phrase('内容没有更新，请重试', 'Could not refresh. Try again.');
   String? _sessionId, _active, _provisional;
   bool _online = false,
       _available = true,
@@ -158,7 +164,7 @@ class ConversationBinding extends ChangeNotifier {
         error = null;
       }
     } on Object catch (failure) {
-      if (!_disposed && generation == _generation) error = failure.toString();
+      if (!_disposed && generation == _generation) error = _message(failure);
     }
     _notify();
   }
@@ -177,7 +183,7 @@ class ConversationBinding extends ChangeNotifier {
         try {
           await release(old);
         } on Object catch (failure) {
-          if (!_disposed) error = failure.toString();
+          if (!_disposed) error = _message(failure);
         }
         continue;
       }
@@ -187,7 +193,7 @@ class ConversationBinding extends ChangeNotifier {
       try {
         await retain(desired);
       } on Object catch (failure) {
-        if (!_disposed && generation == _generation) error = failure.toString();
+        if (!_disposed && generation == _generation) error = _message(failure);
       }
       _notify();
     }

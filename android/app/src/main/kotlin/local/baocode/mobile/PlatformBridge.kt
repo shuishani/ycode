@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -32,24 +33,31 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** Native, offline facilities only. Secure storage never falls back to plaintext. */
 class PlatformBridge(
-    private val activity: FlutterActivity,
+    context: Context,
     messenger: BinaryMessenger,
 ) : MethodChannel.MethodCallHandler, AutoCloseable {
+    // 通知、安全存储、发现不依赖 Activity，后台保连接时仍可用；
+    // 界面能力只在 Activity 附着时可用，否则返回 no_activity。
+    private val appContext = context.applicationContext
+    private var activity: FlutterActivity? = null
+    private fun requireActivity(): FlutterActivity = activity ?: throw NoActivityException()
+    private class NoActivityException : IllegalStateException("No visible activity")
+
     private val methods = MethodChannel(messenger, "local.baocode.mobile/platform")
     private val events = EventChannel(messenger, "local.baocode.mobile/discovery")
     private val main = Handler(Looper.getMainLooper())
     private val storageWorker = Executors.newSingleThreadExecutor()
     private val storageResults = mutableSetOf<MethodChannel.Result>()
-    private val preferences = activity.getSharedPreferences("baocode_secure", Context.MODE_PRIVATE)
+    private val preferences = appContext.getSharedPreferences("baocode_secure", Context.MODE_PRIVATE)
     private var closed = false
     private var exportResult: MethodChannel.Result? = null
     private var exportBytes: ByteArray? = null
     private val permissionWaiters = mutableListOf<(Boolean) -> Unit>()
     private var permissionRequestPending = false
 
-    private val localDiscovery = LocalDiscovery(activity.applicationContext, main)
-    private val chatClipboard = ChatClipboard(activity.applicationContext)
-    private val updates = AndroidUpdates(activity)
+    private val localDiscovery = LocalDiscovery(appContext, main)
+    private val chatClipboard = ChatClipboard(appContext)
+    private val updates = AndroidUpdates(appContext) { activity }
 
     init {
         methods.setMethodCallHandler(this)
@@ -108,12 +116,25 @@ class PlatformBridge(
                     }
                 }
                 "openAppSettings" -> {
-                    activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.parse("package:${activity.packageName}")))
+                    val host = requireActivity()
+                    host.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:${host.packageName}")))
+                    result.success(null)
+                }
+                "batteryUnrestricted" -> result.success(batteryUnrestricted())
+                "requestBatteryUnrestricted" -> {
+                    val host = requireActivity()
+                    // 系统确认框；个别系统没有它就退到电池优化列表，让用户自己找。
+                    val ask = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:${host.packageName}"))
+                    host.startActivity(if (ask.resolveActivity(host.packageManager) != null) ask
+                        else Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                     result.success(null)
                 }
                 else -> result.notImplemented()
             }
+        } catch (error: NoActivityException) {
+            result.error("no_activity", "This action needs the app to be open", null)
         } catch (error: Exception) {
             result.error(if (error is IllegalArgumentException) "bad_arguments" else "platform_failed",
                 error.message, null)
@@ -199,10 +220,11 @@ class PlatformBridge(
         val bytes = call.argument<ByteArray>("bytes")
             ?: throw IllegalArgumentException("缺少文件数据")
         require(bytes.size <= MAX_EXPORT_BYTES) { "文件超过 8 MiB 下载上限" }
+        val host = requireActivity()
         exportResult = result
         exportBytes = bytes
         try {
-            activity.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            host.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "application/octet-stream"
                 putExtra(Intent.EXTRA_TITLE, name)
@@ -234,7 +256,7 @@ class PlatformBridge(
             // 只有用户在系统选择器确认后才写入，不申请全盘存储权限。
             storageWorker.execute {
                 try {
-                    activity.contentResolver.openOutputStream(uri, "wt").use { output ->
+                    appContext.contentResolver.openOutputStream(uri, "wt").use { output ->
                         checkNotNull(output) { "无法打开保存目标" }
                         output.write(bytes)
                     }
@@ -270,21 +292,28 @@ class PlatformBridge(
                 else HapticFeedbackConstants.LONG_PRESS
             else -> HapticFeedbackConstants.VIRTUAL_KEY
         }
-        activity.window.decorView.performHapticFeedback(feedback)
+        requireActivity().window.decorView.performHapticFeedback(feedback)
     }
 
-    private fun notificationAllowed(): Boolean {
+    private fun batteryUnrestricted(): Boolean {
+        if (Build.VERSION.SDK_INT < 23) return true
+        val power = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return power.isIgnoringBatteryOptimizations(appContext.packageName)
+    }
+
+    fun notificationAllowed(): Boolean {
         if (Build.VERSION.SDK_INT >= 33 &&
-            activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            appContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             return false
         }
-        val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         return Build.VERSION.SDK_INT < 24 || manager.areNotificationsEnabled()
     }
 
     private fun requestNotificationPermission(callback: (Boolean) -> Unit) {
+        val host = requireActivity()
         if (Build.VERSION.SDK_INT < 33 ||
-            activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            host.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
             callback(notificationAllowed())
             return
         }
@@ -292,7 +321,7 @@ class PlatformBridge(
         if (permissionRequestPending) return
         permissionRequestPending = true
         try {
-            activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION)
+            host.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION)
         } catch (error: Exception) {
             permissionRequestPending = false
             val waiting = permissionWaiters.toList()
@@ -312,7 +341,7 @@ class PlatformBridge(
     }
 
     private fun postNotification(id: Int, title: String, body: String) {
-        val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
             // 已存在的通道不会因再次 create 而改名：名字和当前不同就先删了重建。
             val existing = manager.getNotificationChannel(NOTIFICATION_CHANNEL)
@@ -323,27 +352,45 @@ class PlatformBridge(
                 NOTIFICATION_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT))
         }
         val builder = if (Build.VERSION.SDK_INT >= 26) {
-            Notification.Builder(activity, NOTIFICATION_CHANNEL)
+            Notification.Builder(appContext, NOTIFICATION_CHANNEL)
         } else {
             @Suppress("DEPRECATION")
-            Notification.Builder(activity)
+            Notification.Builder(appContext)
         }
         builder.setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setAutoCancel(true)
-        activity.packageManager.getLaunchIntentForPackage(activity.packageName)?.let { launch ->
+        appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)?.let { launch ->
             launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            builder.setContentIntent(PendingIntent.getActivity(activity, id, launch,
+            builder.setContentIntent(PendingIntent.getActivity(appContext, id, launch,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
         }
         manager.notify(id, builder.build())
     }
 
+    fun attach(host: FlutterActivity) {
+        if (!closed) activity = host
+    }
+
+    /** Activity 销毁但引擎保留：丢掉 Activity 引用和依赖它的待决请求，通知与安全存储照常。 */
+    fun detachActivity(host: FlutterActivity) {
+        if (activity !== host) return
+        activity = null
+        exportResult?.error("disposed", "文件保存窗口已关闭，保存结果未确认", null)
+        exportResult = null
+        exportBytes = null
+        val waiting = permissionWaiters.toList()
+        permissionWaiters.clear()
+        permissionRequestPending = false
+        waiting.forEach { it(false) }
+    }
+
     override fun close() {
         if (closed) return
         closed = true
+        activity = null
         methods.setMethodCallHandler(null)
         events.setStreamHandler(null)
         localDiscovery.close()

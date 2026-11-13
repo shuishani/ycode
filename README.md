@@ -9,6 +9,8 @@ YCode is an independent, unofficial Android client for the BaoCode desktop app, 
 | Home | Conversation |
 | :---: | :---: |
 | ![Home](docs/screenshots/home.jpg) | ![Conversation](docs/screenshots/chat.jpg) |
+| **Switching the layout** | **Focus side panel** |
+| ![Settings → Layout](docs/screenshots/layout.jpg) | ![Focus side panel](docs/screenshots/focus.jpg) |
 
 YCode is not an official BaoCode product and is not supported by the BaoCode team. Model calls, credentials and task execution stay on the desktop. Only connect to computers you trust.
 
@@ -20,9 +22,10 @@ YCode is not an official BaoCode product and is not supported by the BaoCode tea
 
 ## Features
 
-- Conversations, Bots, Files and Settings tabs; Chinese and English; follows the system theme or light/dark.
-- Pair by QR code, pasted link or LAN discovery; multiple computers; reconnects after drops.
-- Search, filter, pin and archive projects and conversations, and unfold a project's conversations right on the home list; streaming messages, queued and immediate sends, images and @ files, / commands.
+- Two layouts, switched under Settings → Layout: "List" has Conversations, Bots, Files and Settings tabs; "Focus" opens straight into your last conversation, with projects and conversations in a side panel.
+- Chinese and English; follows the system theme or light/dark.
+- Pair by QR code, pasted link or LAN discovery; multiple computers; reconnects after drops; optionally keeps the connection in the background (experimental).
+- Search, pin and archive projects and conversations, and unfold a project's conversations right on the home list; streaming messages, queued and immediate sends, images and @ files, / commands.
 - Edit and resend an earlier message, optionally undoing the files the agent changed after it; a context usage ring in the composer (both need BaoCode desktop 1.9.3 or later).
 - Markdown, code highlighting, math and offline Mermaid; folded tools and thinking, approvals and questions, plans, subagents.
 - Switch models, modes and permissions with provider icons; quota checks need desktop support, and the official desktop shows them as unsupported.

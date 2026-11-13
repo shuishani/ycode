@@ -94,7 +94,10 @@ extension _Choices on _ChatPageState {
                           ? null
                           : LucideIcon(
                               _choicePresentation(choice.kind, option).$3!,
-                              size: 22,
+                              size: _opticalIconSize(
+                                _choicePresentation(choice.kind, option).$3!,
+                                22,
+                              ),
                               color: option.caution
                                   ? MobileTheme.statusColorsOf(context).warning
                                   : Theme.of(context)
@@ -153,7 +156,7 @@ extension _Choices on _ChatPageState {
     ('mode', 'agent') => (
       option.label,
       tr('规划、编辑并运行代码', option.description),
-      'bot',
+      'infinity',
     ),
     ('mode', 'ask') => (
       option.label,
@@ -192,6 +195,10 @@ extension _Choices on _ChatPageState {
     ),
     _ => (option.label, option.description, null),
   };
+
+  /// ∞ 只占画布中间一窄条，同尺寸时显得比盾牌等图标小，略放大补偿。
+  double _opticalIconSize(String name, double size) =>
+      name == 'infinity' ? size + 2 : size;
 
   String _choiceLabel(String kind) => switch (kind) {
     'model' => tr('模型', 'Model'),
@@ -320,13 +327,15 @@ extension _Choices on _ChatPageState {
     if (name == null && !_iconOnly(choice)) {
       return Icon(Icons.tune, size: size, color: color);
     }
+    final icon =
+        name ??
+        switch (choice.kind) {
+          'permission' => 'shield',
+          _ => 'infinity',
+        };
     return LucideIcon(
-      name ??
-          switch (choice.kind) {
-            'permission' => 'shield',
-            _ => 'bot',
-          },
-      size: size,
+      icon,
+      size: _opticalIconSize(icon, size),
       color: choice.kind == 'permission' && selected?.id == 'bypassPermissions'
           ? MobileTheme.statusColorsOf(context).warning
           : color,

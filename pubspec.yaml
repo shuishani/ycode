@@ -1,7 +1,7 @@
 name: baocode_mobile
 description: YCode, an unofficial Android client for BaoCode desktops.
 publish_to: none
-version: 0.1.1+2
+version: 0.2.0+3
 
 environment:
   sdk: ^3.13.4

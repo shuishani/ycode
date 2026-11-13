@@ -51,12 +51,8 @@ class _ImageDeckState extends State<ImageDeck> {
   double _heightOf(int index, double width) =>
       ImageDeck.heightFor(widget.images[index].bytes, width);
 
-  void _view(int index) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) =>
-          ImageGalleryPage(images: widget.images, initialIndex: index),
-    ),
-  );
+  void _view(int index) =>
+      showImageGallery(context, widget.images, initialIndex: index);
 
   /// 边线和阴影让和页面同色的截图也有边界；[dim] 压暗后面的图，只留层次。
   Widget _picture(int index, double width, double height, {double dim = 0}) {

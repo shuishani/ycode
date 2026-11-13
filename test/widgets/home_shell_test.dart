@@ -1,7 +1,6 @@
 import 'package:bao_link/bao_link.dart';
 import 'package:baocode_mobile/link/link_store.dart';
 import 'package:baocode_mobile/state/app_state.dart';
-import 'package:baocode_mobile/ui/devices/devices_page.dart';
 import 'package:baocode_mobile/ui/home_shell.dart';
 import 'package:baocode_mobile/ui/settings/settings_page.dart';
 import 'package:baocode_mobile/theme/app_theme.dart';
@@ -134,7 +133,7 @@ void main() {
     expect(other.isLabelVisible, isFalse);
   });
 
-  testWidgets('对话新增菜单保留新对话、Bot 与配对入口', (tester) async {
+  testWidgets('对话新增菜单只保留新对话与 Bot，不放配对入口', (tester) async {
     final state = AppState(demo: true, store: MemoryLinkStore());
     addTearDown(state.dispose);
     await state.initialize();
@@ -151,10 +150,7 @@ void main() {
     expect(find.byKey(const ValueKey('dropdown-panel')), findsOneWidget);
     expect(find.text('新对话'), findsOneWidget);
     expect(find.text('添加 Bot'), findsWidgets);
-    expect(find.text('配对新电脑'), findsOneWidget);
-    await tester.tap(find.text('配对新电脑'));
-    await tester.pumpAndSettle();
-    expect(find.byType(PairDevicePage), findsOneWidget);
+    expect(find.text('配对新电脑'), findsNothing);
     expect(tester.takeException(), isNull);
   });
   testWidgets('四项导航：对话、Bot、文件、设置', (tester) async {

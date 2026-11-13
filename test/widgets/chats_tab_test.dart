@@ -334,22 +334,19 @@ void main() {
     expect(state.calls, isEmpty);
     expect(find.text('项目甲（2）'), findsOneWidget);
   });
-  testWidgets('官方样式筛选点选即时生效，清除后恢复且不发送请求', (tester) async {
-    final state = _State();
+  testWidgets('首页没有筛选按钮，搜索项目名只留下该项目，清除后恢复', (tester) async {
+    final state = _State()..withBot = true;
     addTearDown(state.dispose);
     await tester.pumpWidget(MaterialApp(home: ChatsTab(state: state)));
-    await tester.tap(find.byTooltip('筛选对话'));
-    await tester.pumpAndSettle();
-    expect(find.text('SSH / WSL'), findsOneWidget);
-    expect(find.text('全部项目'), findsOneWidget);
-    await tester.tap(find.text('进行中'));
-    await tester.pumpAndSettle();
-    await tester.tapAt(const Offset(780, 590));
-    await tester.pumpAndSettle();
-    expect(find.text('项目甲（2）'), findsNothing);
-    await tester.tap(find.text('清除'));
+    expect(find.byTooltip('筛选对话'), findsNothing);
+    expect(find.text('空项目'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '项目甲');
     await tester.pumpAndSettle();
     expect(find.text('项目甲（2）'), findsOneWidget);
+    expect(find.text('空项目'), findsNothing);
+    await tester.tap(find.text('清除'));
+    await tester.pumpAndSettle();
+    expect(find.text('空项目'), findsOneWidget);
     expect(state.calls, isEmpty);
   });
   testWidgets('点击首页上的对话直接打开正确会话', (tester) async {
@@ -390,8 +387,8 @@ void main() {
     final menu = find.byKey(const ValueKey('dropdown-panel'));
     expect(find.byType(BottomSheet), findsNothing);
     expect(find.text('添加 Bot'), findsOneWidget);
-    expect(find.text('配对新电脑'), findsOneWidget);
-    // 只有三行操作，从按钮下方展开，高度贴合内容。
+    expect(find.text('配对新电脑'), findsNothing);
+    // 只有两行操作，从按钮下方展开，高度贴合内容。
     expect(find.text('新建'), findsNothing);
     expect(
       tester.getTopLeft(menu).dy,
@@ -443,26 +440,6 @@ void main() {
       ),
     );
     expect(pin, findsOneWidget);
-  });
-
-  testWidgets('筛选里选了项目就收起面板，首页直接平铺它的对话，不再是项目文件夹', (tester) async {
-    final state = _State();
-    addTearDown(state.dispose);
-    await tester.pumpWidget(MaterialApp(home: ChatsTab(state: state)));
-    expect(find.text('项目甲（2）'), findsOneWidget);
-    expect(find.text('审批任务'), findsNothing);
-    await tester.tap(find.byTooltip('筛选对话'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('项目甲'));
-    await tester.pumpAndSettle();
-    expect(find.text('全部项目'), findsNothing, reason: '选完自动收起');
-    expect(find.text('项目甲（2）'), findsNothing);
-    expect(find.byKey(const ValueKey('session-在线-会话甲')), findsOneWidget);
-    expect(find.byKey(const ValueKey('session-在线-会话乙')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('session-在线-会话乙')));
-    await tester.pumpAndSettle();
-    expect(tester.widget<ChatPage>(find.byType(ChatPage)).sessionId, '会话乙');
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('点项目行尾的箭头在首页展开它的对话，再点收起，不进入项目', (tester) async {

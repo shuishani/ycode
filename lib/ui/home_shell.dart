@@ -5,6 +5,7 @@ import '../state/update_check.dart';
 import 'bots/bots_tab.dart';
 import 'conversations/chats_tab.dart';
 import 'files/files_tab.dart';
+import 'focus/focus_shell.dart';
 import 'settings/settings_page.dart';
 import 'widgets/lucide_icon.dart';
 import '../theme/app_theme.dart';
@@ -69,6 +70,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
+    if (state.settings.focusLayout) return FocusShell(state: state);
     final entries = [
       ('message-circle', state.tr('对话', 'Chats')),
       ('bot', 'Bot'),
@@ -171,12 +173,18 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                                 key: ValueKey('tab-badge-$index'),
                                 isLabelVisible: index == 0 && unread > 0,
                                 label: Text('$unread'),
-                                child: LucideIcon(
-                                  entries[index].$1,
-                                  size: 24,
-                                  color: index == _tab
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Theme.of(context).hintColor,
+                                // bot 的图形矮，放大一点才和别的图标看着一样大；占位不变。
+                                child: Transform.scale(
+                                  scale: entries[index].$1 == 'bot'
+                                      ? 26 / 24
+                                      : 1,
+                                  child: LucideIcon(
+                                    entries[index].$1,
+                                    size: 24,
+                                    color: index == _tab
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(context).hintColor,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: MobileSpace.xs),

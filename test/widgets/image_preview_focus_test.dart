@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/chat_test_state.dart';
+import '../support/image_test_support.dart';
 
 typedef _State = ChatTestState;
 
@@ -16,13 +17,7 @@ void main() {
       {
         't': 'user',
         'text': '图片说明',
-        'images': [
-          {
-            'data': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=',
-            'type': 'image/png',
-            'name': 'preview.png',
-          },
-        ],
+        'images': [testImageWire('preview.png')],
       },
       for (var i = 0; i < 25; i++) {'t': 'text', 'text': '历史消息 $i\n第二行\n第三行'},
     ]);

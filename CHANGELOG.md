@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0
+
+- New: a "Focus" option under Layout opens straight into your last conversation, with projects and conversations in a side panel, grouped by project; tap one to switch. "List" stays the default.
+- New (experimental): Settings → Notifications → "Keep desktop connection in background" keeps task notifications coming with the app in the background. It shows a persistent notification, uses more battery, and some phones may still stop it.
+- Improved: the home list drops the filter and keeps just search; the create menu keeps just New conversation and Add bot.
+- Improved: Agent mode uses an infinity icon.
+- Improved: coming back to the app no longer re-syncs the whole conversation; switching networks checks the connection right away.
+- Improved: long conversations and ones with many pictures load more smoothly.
+- Improved: a tool's screenshot shows once; open it to swipe through the others.
+- Improved: Markdown file previews show the project's pictures inline; tap one to view it full screen.
+- Fixed: no "finished" notification when a task finished quickly.
+- Fixed: syncing a long conversation could mistake the connection for lost and reload over and over.
+- Fixed: a message that failed to send took a long time to say so.
+- Fixed: a plan card could say the file is missing; a sync timeout showed the raw error.
+
+
 ## 0.1.1
 
 Context usage and undoing file changes need BaoCode desktop 1.9.3 or later; with an older desktop they don't appear and everything else works as before.
